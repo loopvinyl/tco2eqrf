@@ -166,6 +166,13 @@ def exibir_cotacao_carbono():
         st.session_state.mostrar_atualizacao = False
     if 'cotacao_atualizada' not in st.session_state:
         st.session_state.cotacao_atualizada = False
+    if 'preco_carbono' not in st.session_state:
+        st.session_state.preco_carbono = 85.50
+        st.session_state.moeda_carbono = "€"
+        st.session_state.fonte_cotacao = "Referência"
+    if 'taxa_cambio' not in st.session_state:
+        st.session_state.taxa_cambio = 5.50
+        st.session_state.moeda_real = "R$"
     
     if not st.session_state.cotacao_carregada:
         st.session_state.mostrar_atualizacao = True
@@ -203,16 +210,6 @@ def exibir_cotacao_carbono():
         
         st.rerun()
 
-    # Garantir que as variáveis existem antes de usá-las
-    if 'preco_carbono' not in st.session_state:
-        st.session_state.preco_carbono = 85.50
-        st.session_state.moeda_carbono = "€"
-        st.session_state.fonte_cotacao = "Referência"
-    
-    if 'taxa_cambio' not in st.session_state:
-        st.session_state.taxa_cambio = 5.50
-        st.session_state.moeda_real = "R$"
-    
     st.sidebar.metric(
         label=f"Preço do Carbono (tCO₂eq)",
         value=f"{st.session_state.moeda_carbono} {formatar_br(st.session_state.preco_carbono)}",
@@ -802,8 +799,6 @@ def main():
                 resultados_viabilidade = analise_viabilidade_economica(dados_viabilidade)
                 
                 # Continuação da simulação...
-                # (O restante do código permanece igual, mas com verificações adicionais)
-                
                 st.subheader("🎲 Análise de Incerteza (Monte Carlo)")
                 
                 params_base_mc = {
@@ -928,8 +923,162 @@ def main():
                         delta_rend
                     )
                 
-                # O restante do código de visualização continua aqui...
-                # (Por questão de espaço, mantenho apenas as partes críticas)
+                # O restante do código de visualização...
+                # Para manter o código mais curto, vou continuar com as partes principais
+                
+                st.subheader("💰 Análise de Viabilidade Econômica")
+                
+                fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+                
+                anos_array = list(range(1, anos_simulacao + 1))
+                axes[0].bar(anos_array, resultados_viabilidade['fluxo_caixa'])
+                axes[0].axhline(y=0, color='r', linestyle='--', alpha=0.5)
+                axes[0].set_xlabel('Ano')
+                axes[0].set_ylabel('Fluxo de Caixa (R$/ha)')
+                axes[0].set_title('Fluxo de Caixa Descontado')
+                axes[0].grid(True, alpha=0.3)
+                axes[0].yaxis.set_major_formatter(FuncFormatter(br_format))
+                
+                axes[1].hist(resultados_mc['vpl'], bins=30, edgecolor='black', alpha=0.7)
+                axes[1].axvline(x=0, color='r', linestyle='--', linewidth=2, label='Ponto de Equilíbrio')
+                
+                media_vpl = np.mean(resultados_mc['vpl'])
+                axes[1].axvline(x=media_vpl, color='g', linestyle='-', 
+                               linewidth=2, label=f'Média: R$ {formatar_br(media_vpl)}')
+                
+                axes[1].set_xlabel('VPL (R$/ha)')
+                axes[1].set_ylabel('Frequência')
+                axes[1].set_title('Distribuição do VPL (Monte Carlo)')
+                axes[1].legend()
+                axes[1].grid(True, alpha=0.3)
+                axes[1].xaxis.set_major_formatter(FuncFormatter(br_format))
+                
+                if 'sensibilidade_significativa' in locals() and len(sensibilidade_significativa) > 0:
+                    top_params = sensibilidade_significativa.sort_values('ST', ascending=False).head(4)
+                    axes[2].barh(top_params['Parâmetro'], top_params['ST'])
+                    axes[2].set_xlabel('Índice de Sensibilidade Total (ST)')
+                    axes[2].set_title('Parâmetros Mais Influentes (Sobol)')
+                    
+                    for i, (param, st) in enumerate(zip(top_params['Parâmetro'], top_params['ST'])):
+                        axes[2].text(st + 0.01, i, f'{st:.3f}', va='center', fontsize=9)
+                        
+                    axes[2].axvline(x=0.1, color='orange', linestyle='--', alpha=0.5, label='Limite moderado (0.1)')
+                    axes[2].axvline(x=0.3, color='red', linestyle='--', alpha=0.5, label='Limite alto (0.3)')
+                    axes[2].legend(fontsize=8)
+                else:
+                    axes[2].text(0.5, 0.5, 'Sensibilidade não significativa', 
+                                ha='center', va='center', transform=axes[2].transAxes)
+                    axes[2].set_title('Análise de Sensibilidade (Sobol)')
+                
+                axes[2].grid(True, alpha=0.3)
+                
+                plt.tight_layout()
+                st.pyplot(fig)
+                
+                st.subheader("📋 Resumo Estatístico")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("#### Monte Carlo (500 simulações)")
+                    probabilidade = np.mean(resultados_mc['viabilidade']) * 100
+                    st.metric(
+                        "Probabilidade de Viabilidade",
+                        f"{formatar_br(probabilidade)}%",
+                        help="Percentual de simulações onde VPL > 0"
+                    )
+                    
+                    st.metric(
+                        "VPL Médio",
+                        f"R$ {formatar_br(np.mean(resultados_mc['vpl']))}/ha",
+                        help="Valor Presente Líquido médio por hectare"
+                    )
+                    
+                    perc_2_5 = np.percentile(resultados_mc['vpl'], 2.5)
+                    perc_97_5 = np.percentile(resultados_mc['vpl'], 97.5)
+                    intervalo_texto = f"[R$ {formatar_br(perc_2_5)}, R$ {formatar_br(perc_97_5)}]"
+                    
+                    st.metric(
+                        "Intervalo de Confiança 95%",
+                        intervalo_texto,
+                        help="Intervalo de confiança do VPL"
+                    )
+                
+                with col2:
+                    st.write("#### Viabilidade Base")
+                    st.metric(
+                        "VPL do Projeto",
+                        f"R$ {formatar_br(resultados_viabilidade['vpl'] * area_total)}",
+                        f"R$ {formatar_br(resultados_viabilidade['vpl'])}/ha"
+                    )
+                    
+                    st.metric(
+                        "Payback Simples",
+                        f"{resultados_viabilidade['payback']} anos",
+                        help="Tempo para recuperar o investimento"
+                    )
+                    
+                    if resultados_viabilidade['vpl'] < 0:
+                        custo_adicional_ha = custo_crf_ha - custo_conv_ha
+                        beneficio_rendimento_ha = max(0, (rendimento_crf_ha - rendimento_conv_ha) * preco_produto)
+                        reducao_ha = reducao_tco2eq_total / area_total
+                        
+                        if reducao_ha > 0:
+                            preco_minimo_ha = (custo_adicional_ha - beneficio_rendimento_ha) / reducao_ha
+                            preco_minimo_eur = preco_minimo_ha / st.session_state.taxa_cambio
+                            
+                            st.metric(
+                                "Preço Mínimo do Carbono para Viabilidade",
+                                f"€ {formatar_br(preco_minimo_eur)}/tCO₂eq",
+                                f"R$ {formatar_br(preco_minimo_ha)}/tCO₂eq",
+                                help="Preço necessário para tornar o projeto viável"
+                            )
+                        else:
+                            st.metric(
+                                "Preço Mínimo do Carbono",
+                                "N/A",
+                                "Redução de emissões insuficiente"
+                            )
+                
+                # Resumo final
+                st.subheader("🎯 Conclusões e Recomendações")
+                
+                vpl_ha = resultados_viabilidade['vpl']
+                probabilidade_viabilidade = np.mean(resultados_mc['viabilidade']) * 100
+                
+                if vpl_ha > 0:
+                    st.success(f"""
+                    **✅ PROJETO VIÁVEL**
+                    
+                    - **VPL positivo:** R$ {formatar_br(vpl_ha * area_total)} (R$ {formatar_br(vpl_ha)}/ha)
+                    - **Probabilidade de sucesso:** {formatar_br(probabilidade_viabilidade)}%
+                    - **Payback:** {resultados_viabilidade['payback']} anos
+                    - **Preço atual do carbono:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
+                    - **Custo adicional do CRF:** R$ {formatar_br(custo_crf - custo_convencional)} ({formatar_br(((custo_crf_ha/custo_conv_ha)-1)*100)}% mais caro)
+                    
+                    **Recomendações:**
+                    1. Implementar projeto piloto em área reduzida
+                    2. Buscar certificação VCS ou Gold Standard
+                    3. Negociar contratos de venda antecipada de créditos
+                    4. Aproveitar ganhos de produtividade (se aplicável)
+                    """)
+                else:
+                    st.warning(f"""
+                    **⚠️ PROJETO NÃO VIÁVEL NO CENÁRIO ATUAL**
+                    
+                    - **VPL negativo:** R$ {formatar_br(vpl_ha * area_total)} (R$ {formatar_br(vpl_ha)}/ha)
+                    - **Probabilidade de viabilidade:** {formatar_br(probabilidade_viabilidade)}%
+                    - **Preço atual do carbono:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
+                    - **Custo adicional do CRF:** R$ {formatar_br(custo_crf - custo_convencional)} ({formatar_br(((custo_crf_ha/custo_conv_ha)-1)*100)}% mais caro)
+                    - **Fator limitante:** Custo adicional do CRF
+                    
+                    **Estratégias para viabilizar:**
+                    1. Buscar subsídios governamentais para transição
+                    2. Negociar desconto com fornecedores de CRF
+                    3. Esperar aumento no preço do carbono
+                    4. Focar no aumento de produtividade como principal benefício
+                    5. Considerar combinação CRF + ureia para reduzir custos
+                    """)
                 
         else:
             st.info("""
@@ -967,8 +1116,8 @@ def main():
             df_comparacao = pd.DataFrame(comparacao_data)
             st.dataframe(df_comparacao)
     
-    except Exception as e:
-        st.error(f"Ocorreu um erro no aplicativo: {str(e)}")
+    except Exception as error:
+        st.error(f"Ocorreu um erro no aplicativo: {str(error)}")
         st.info("""
         **Solução de problemas:**
         1. Tente recarregar a página
