@@ -1,5 +1,3 @@
-import requests
-from bs4 import BeautifulSoup
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -101,7 +99,7 @@ def calcular_custo_fertilizante(tipo, area_ha):
         kg_ureia = DOSAGEM_N / 0.46  # kg de ureia por ha (46% N)
         custo_ha = (kg_ureia / 1000) * PRECO_UREIA
     else:  # CRF
-        kg_crf = DOSAGEM_N / 0.42  # kg de CRF por ha (42% N)
+        kg_crf = DOSAGEM_N / 0.42  # kg de CRF per ha (42% N)
         custo_ha = (kg_crf / 1000) * PRECO_CRF
     
     custo_total = custo_ha * area_ha
@@ -147,40 +145,51 @@ def analise_viabilidade_economica(dados_simulacao):
         'payback': 0
     }
     
-    # Calcula custo adicional do CRF
-    custo_convencional_ha = dados_simulacao['custo_convencional_ha']
-    custo_crf_ha = dados_simulacao['custo_crf_ha']
-    custo_adicional_ha = custo_crf_ha - custo_convencional_ha
-    
-    # Calcula benefícios
-    receita_carbono_ha = dados_simulacao['receita_carbono_ha']
-    
-    # Benefício de rendimento (se houver)
-    rendimento_adicional_ha = dados_simulacao.get('rendimento_adicional_ha', 0)
-    preco_produto = dados_simulacao.get('preco_produto', 1000)  # R$/tonelada
-    
-    beneficio_rendimento_ha = rendimento_adicional_ha * preco_produto
-    
-    # Fluxo de caixa anual por hectare
-    fluxo_anual_ha = receita_carbono_ha + beneficio_rendimento_ha - custo_adicional_ha
-    
-    # Para anos simulados
-    anos = dados_simulacao['anos']
-    taxa_desconto = dados_simulacao.get('taxa_desconto', 0.06)
-    
-    for ano in range(1, anos + 1):
-        fluxo_descontado = fluxo_anual_ha / ((1 + taxa_desconto) ** ano)
-        resultados['fluxo_caixa'].append(fluxo_descontado)
-    
-    resultados['vpl'] = sum(resultados['fluxo_caixa'])
-    
-    # Payback simples
-    acumulado = 0
-    for ano, fluxo in enumerate(resultados['fluxo_caixa'], 1):
-        acumulado += fluxo
-        if acumulado >= 0:
-            resultados['payback'] = ano
-            break
+    try:
+        # Valores padrão para evitar KeyError
+        custo_convencional_ha = dados_simulacao.get('custo_convencional_ha', 0)
+        custo_crf_ha = dados_simulacao.get('custo_crf_ha', 0)
+        receita_carbono_ha = dados_simulacao.get('receita_carbono_ha', 0)
+        rendimento_adicional_ha = dados_simulacao.get('rendimento_adicional_ha', 0)
+        preco_produto = dados_simulacao.get('preco_produto', 1000)
+        
+        # Calcula custo adicional do CRF
+        custo_adicional_ha = custo_crf_ha - custo_convencional_ha
+        
+        # Calcula benefícios
+        beneficio_rendimento_ha = rendimento_adicional_ha * preco_produto
+        
+        # Fluxo de caixa anual por hectare
+        fluxo_anual_ha = receita_carbono_ha + beneficio_rendimento_ha - custo_adicional_ha
+        
+        # Para anos simulados
+        anos = dados_simulacao.get('anos', 10)
+        taxa_desconto = dados_simulacao.get('taxa_desconto', 0.06)
+        
+        for ano in range(1, anos + 1):
+            fluxo_descontado = fluxo_anual_ha / ((1 + taxa_desconto) ** ano)
+            resultados['fluxo_caixa'].append(fluxo_descontado)
+        
+        resultados['vpl'] = sum(resultados['fluxo_caixa'])
+        
+        # Payback simples
+        acumulado = 0
+        resultados['payback'] = anos + 1  # Valor padrão se não atingir payback
+        
+        for ano, fluxo in enumerate(resultados['fluxo_caixa'], 1):
+            acumulado += fluxo
+            if acumulado >= 0 and resultados['payback'] == anos + 1:
+                resultados['payback'] = ano
+                break
+                
+    except Exception as e:
+        st.error(f"Erro na análise de viabilidade: {e}")
+        resultados = {
+            'fluxo_caixa': [0] * dados_simulacao.get('anos', 10),
+            'vpl': 0,
+            'tir': 0,
+            'payback': dados_simulacao.get('anos', 10) + 1
+        }
     
     return resultados
 
@@ -426,6 +435,12 @@ def main():
                 taxa_cambio
             )
             
+            # Calcular receita por hectare
+            receita_carbono_ha = receita_carbono_real / area_total if area_total > 0 else 0
+            
+            # Calcular rendimento adicional por hectare
+            rendimento_adicional_ha = rendimento_crf_ha - rendimento_conv_ha
+            
             # =================================================================
             # 2. ANÁLISE DE VIABILIDADE
             # =================================================================
@@ -436,11 +451,13 @@ def main():
                 'emissao_crf': emissao_crf_kg,
                 'custo_convencional_ha': custo_conv_ha,
                 'custo_crf_ha': custo_crf_ha,
+                'receita_carbono_ha': receita_carbono_ha,
                 'preco_carbono': preco_carbono_eur,
                 'taxa_cambio': taxa_cambio,
                 'taxa_desconto': taxa_desconto,
                 'rendimento_base': rendimento_base,
                 'preco_produto': preco_produto,
+                'rendimento_adicional_ha': rendimento_adicional_ha,
                 'estudo': estudo_selecionado
             }
             
@@ -627,14 +644,21 @@ def main():
                     
                     # Calcular preço mínimo do carbono para viabilidade
                     reducao_ha = reducao_tco2eq_total / area_total
-                    preco_minimo_ha = (custo_adicional_ha - beneficio_rendimento_ha) / reducao_ha
-                    preco_minimo_eur = preco_minimo_ha / taxa_cambio
-                    
-                    st.metric(
-                        "Preço Mínimo do Carbono para Viabilidade",
-                        f"€ {preco_minimo_eur:,.0f}/tCO₂eq",
-                        f"R$ {preco_minimo_ha:,.0f}/tCO₂eq"
-                    )
+                    if reducao_ha > 0:
+                        preco_minimo_ha = (custo_adicional_ha - beneficio_rendimento_ha) / reducao_ha
+                        preco_minimo_eur = preco_minimo_ha / taxa_cambio
+                        
+                        st.metric(
+                            "Preço Mínimo do Carbono para Viabilidade",
+                            f"€ {preco_minimo_eur:,.0f}/tCO₂eq",
+                            f"R$ {preco_minimo_ha:,.0f}/tCO₂eq"
+                        )
+                    else:
+                        st.metric(
+                            "Preço Mínimo do Carbono",
+                            "N/A",
+                            "Redução de emissões insuficiente"
+                        )
             
             # =================================================================
             # 8. ANÁLISE POR CENÁRIO
@@ -709,7 +733,7 @@ def main():
                 **Estratégias para viabilizar:**
                 1. Buscar subsídios governamentais para transição
                 2. Negociar desconto com fornecedores de CRF
-                3. Esperar aumento no preço do carbono (viável a partir de € {preco_minimo_eur:,.0f}/tCO₂eq)
+                3. Esperar aumento no preço do carbono (viável a partir de € {preco_minimo_eur if 'preco_minimo_eur' in locals() else 'N/A':,.0f}/tCO₂eq)
                 4. Focar no aumento de produtividade como principal benefício
                 5. Considerar combinação CRF + ureia para reduzir custos
                 """)
