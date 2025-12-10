@@ -1,3 +1,5 @@
+import requests
+from bs4 import BeautifulSoup
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -23,6 +25,302 @@ np.seterr(divide='ignore', invalid='ignore')
 plt.rcParams['figure.dpi'] = 150
 plt.rcParams['font.size'] = 10
 sns.set_style("whitegrid")
+
+# =============================================================================
+# FUNÇÕES DE COTAÇÃO AUTOMÁTICA DO CARBONO E CÂMBIO
+# =============================================================================
+
+def obter_cotacao_carbono_investing():
+    """
+    Obtém a cotação em tempo real do carbono via web scraping do Investing.com
+    """
+    try:
+        url = "https://www.investing.com/commodities/carbon-emissions"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Referer': 'https://www.investing.com/'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Várias estratégias para encontrar o preço
+        selectores = [
+            '[data-test="instrument-price-last"]',
+            '.text-2xl',
+            '.last-price-value',
+            '.instrument-price-last',
+            '.pid-1062510-last',
+            '.float_lang_base_1',
+            '.top.bold.inlineblock',
+            '#last_last'
+        ]
+        
+        preco = None
+        fonte = "Investing.com"
+        
+        for seletor in selectores:
+            try:
+                elemento = soup.select_one(seletor)
+                if elemento:
+                    texto_preco = elemento.text.strip().replace(',', '')
+                    # Remover caracteres não numéricos exceto ponto
+                    texto_preco = ''.join(c for c in texto_preco if c.isdigit() or c == '.')
+                    if texto_preco:
+                        preco = float(texto_preco)
+                        break
+            except (ValueError, AttributeError):
+                continue
+        
+        if preco is not None:
+            return preco, "€", "Carbon Emissions Future", True, fonte
+        
+        # Tentativa alternativa: procurar por padrões numéricos no HTML
+        import re
+        padroes_preco = [
+            r'"last":"([\d,]+)"',
+            r'data-last="([\d,]+)"',
+            r'last_price["\']?:\s*["\']?([\d,]+)',
+            r'value["\']?:\s*["\']?([\d,]+)'
+        ]
+        
+        html_texto = str(soup)
+        for padrao in padroes_preco:
+            matches = re.findall(padrao, html_texto)
+            for match in matches:
+                try:
+                    preco_texto = match.replace(',', '')
+                    preco = float(preco_texto)
+                    if 50 < preco < 200:  # Faixa razoável para carbono
+                        return preco, "€", "Carbon Emissions Future", True, fonte
+                except ValueError:
+                    continue
+                    
+        return None, None, None, False, fonte
+        
+    except Exception as e:
+        return None, None, None, False, f"Investing.com - Erro: {str(e)}"
+
+def obter_cotacao_carbono():
+    """
+    Obtém a cotação em tempo real do carbono - usa apenas Investing.com
+    """
+    # Tentar via Investing.com
+    preco, moeda, contrato_info, sucesso, fonte = obter_cotacao_carbono_investing()
+    
+    if sucesso:
+        return preco, moeda, f"{contrato_info}", True, fonte
+    
+    # Fallback para valor padrão
+    return 85.50, "€", "Carbon Emissions (Referência)", False, "Referência"
+
+def obter_cotacao_euro_real():
+    """
+    Obtém a cotação em tempo real do Euro em relação ao Real Brasileiro
+    """
+    try:
+        # API do BCB
+        url = "https://economia.awesomeapi.com.br/last/EUR-BRL"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            cotacao = float(data['EURBRL']['bid'])
+            return cotacao, "R$", True, "AwesomeAPI"
+    except:
+        pass
+    
+    try:
+        # Fallback para API alternativa
+        url = "https://api.exchangerate-api.com/v4/latest/EUR"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            cotacao = data['rates']['BRL']
+            return cotacao, "R$", True, "ExchangeRate-API"
+    except:
+        pass
+    
+    # Fallback para valor de referência
+    return 5.50, "R$", False, "Referência"
+
+def calcular_valor_creditos(emissoes_evitadas_tco2eq, preco_carbono_por_tonelada, moeda, taxa_cambio=1):
+    """
+    Calcula o valor financeiro das emissões evitadas baseado no preço do carbono
+    """
+    valor_total = emissoes_evitadas_tco2eq * preco_carbono_por_tonelada * taxa_cambio
+    return valor_total
+
+def exibir_cotacao_carbono():
+    """
+    Exibe a cotação do carbono com informações - ATUALIZADA AUTOMATICAMENTE
+    """
+    st.sidebar.header("💰 Mercado de Carbono e Câmbio")
+    
+    # Atualização automática na primeira execução
+    if not st.session_state.get('cotacao_carregada', False):
+        st.session_state.mostrar_atualizacao = True
+        st.session_state.cotacao_carregada = True
+    
+    # Botão para atualizar cotações
+    col1, col2 = st.sidebar.columns([3, 1])
+    with col1:
+        if st.button("🔄 Atualizar Cotações", key="atualizar_cotacoes"):
+            st.session_state.cotacao_atualizada = True
+            st.session_state.mostrar_atualizacao = True
+    
+    # Mostrar mensagem de atualização se necessário
+    if st.session_state.get('mostrar_atualizacao', False):
+        st.sidebar.info("🔄 Atualizando cotações...")
+        
+        # Obter cotação do carbono
+        preco_carbono, moeda, contrato_info, sucesso_carbono, fonte_carbono = obter_cotacao_carbono()
+        
+        # Obter cotação do Euro
+        preco_euro, moeda_real, sucesso_euro, fonte_euro = obter_cotacao_euro_real()
+        
+        # Atualizar session state
+        st.session_state.preco_carbono = preco_carbono
+        st.session_state.moeda_carbono = moeda
+        st.session_state.taxa_cambio = preco_euro
+        st.session_state.moeda_real = moeda_real
+        st.session_state.fonte_cotacao = fonte_carbono
+        
+        # Resetar flags
+        st.session_state.mostrar_atualizacao = False
+        st.session_state.cotacao_atualizada = False
+        
+        st.rerun()
+
+    # Exibe cotação atual do carbono
+    st.sidebar.metric(
+        label=f"Preço do Carbono (tCO₂eq)",
+        value=f"{st.session_state.moeda_carbono} {formatar_br(st.session_state.preco_carbono)}",
+        help=f"Fonte: {st.session_state.fonte_cotacao}"
+    )
+    
+    # Exibe cotação atual do Euro
+    st.sidebar.metric(
+        label="Euro (EUR/BRL)",
+        value=f"{st.session_state.moeda_real} {formatar_br(st.session_state.taxa_cambio)}",
+        help="Cotação do Euro em Reais Brasileiros"
+    )
+    
+    # Calcular preço do carbono em Reais
+    preco_carbono_reais = st.session_state.preco_carbono * st.session_state.taxa_cambio
+    
+    st.sidebar.metric(
+        label=f"Carbono em Reais (tCO₂eq)",
+        value=f"R$ {formatar_br(preco_carbono_reais)}",
+        help="Preço do carbono convertido para Reais Brasileiros"
+    )
+    
+    # Informações adicionais
+    with st.sidebar.expander("ℹ️ Informações do Mercado de Carbono"):
+        st.markdown(f"""
+        **📊 Cotações Atuais:**
+        - **Fonte do Carbono:** {st.session_state.fonte_cotacao}
+        - **Preço Atual:** {st.session_state.moeda_carbono} {formatar_br(st.session_state.preco_carbono)}/tCO₂eq
+        - **Câmbio EUR/BRL:** 1 Euro = R$ {formatar_br(st.session_state.taxa_cambio)}
+        - **Carbono em Reais:** R$ {formatar_br(preco_carbono_reais)}/tCO₂eq
+        
+        **🌍 Mercado de Referência:**
+        - European Union Allowances (EUA)
+        - European Emissions Trading System (EU ETS)
+        - Contratos futuros de carbono
+        - Preços em tempo real
+        
+        **🔄 Atualização:**
+        - As cotações são carregadas automaticamente ao abrir o aplicativo
+        - Clique em **"Atualizar Cotações"** para obter valores mais recentes
+        - Em caso de falha na conexão, são utilizados valores de referência atualizados
+        
+        **💡 Importante:**
+        - Os preços são baseados no mercado regulado da UE
+        - Valores em tempo real sujeitos a variações de mercado
+        - Conversão para Real utilizando câmbio comercial
+        """)
+
+# =============================================================================
+# INICIALIZAÇÃO DA SESSION STATE
+# =============================================================================
+
+# Inicializar todas as variáveis de session state necessárias
+def inicializar_session_state():
+    if 'preco_carbono' not in st.session_state:
+        # Buscar cotação automaticamente na inicialização
+        preco_carbono, moeda, contrato_info, sucesso, fonte = obter_cotacao_carbono()
+        st.session_state.preco_carbono = preco_carbono
+        st.session_state.moeda_carbono = moeda
+        st.session_state.fonte_cotacao = fonte
+        
+    if 'taxa_cambio' not in st.session_state:
+        # Buscar cotação do Euro automaticamente
+        preco_euro, moeda_real, sucesso_euro, fonte_euro = obter_cotacao_euro_real()
+        st.session_state.taxa_cambio = preco_euro
+        st.session_state.moeda_real = moeda_real
+        
+    if 'moeda_real' not in st.session_state:
+        st.session_state.moeda_real = "R$"
+    if 'cotacao_atualizada' not in st.session_state:
+        st.session_state.cotacao_atualizada = False
+    if 'run_simulation' not in st.session_state:
+        st.session_state.run_simulation = False
+    if 'mostrar_atualizacao' not in st.session_state:
+        st.session_state.mostrar_atualizacao = False
+    if 'cotacao_carregada' not in st.session_state:
+        st.session_state.cotacao_carregada = False
+    if 'executar_simulacao' not in st.session_state:
+        st.session_state.executar_simulacao = False
+
+# Chamar a inicialização
+inicializar_session_state()
+
+# =============================================================================
+# FUNÇÕES DE FORMATAÇÃO BRASILEIRA
+# =============================================================================
+
+# Função para formatar números no padrão brasileiro
+def formatar_br(numero):
+    """
+    Formata números no padrão brasileiro: 1.234,56
+    """
+    if pd.isna(numero):
+        return "N/A"
+    
+    # Arredonda para 2 casas decimais
+    numero = round(numero, 2)
+    
+    # Formata como string e substitui o ponto pela vírgula
+    return f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+# Função de formatação para os gráficos
+def br_format(x, pos):
+    """
+    Função de formatação para eixos de gráficos (padrão brasileiro)
+    """
+    if x == 0:
+        return "0"
+    
+    # Para valores muito pequenos, usa notação científica
+    if abs(x) < 0.01:
+        return f"{x:.1e}".replace(".", ",")
+    
+    # Para valores grandes, formata com separador de milhar
+    if abs(x) >= 1000:
+        return f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    # Para valores menores, mostra duas casas decimais
+    return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def br_format_5_dec(x, pos):
+    """
+    Função de formatação para eixos de gráficos (padrão brasileiro com 5 decimais)
+    """
+    return f"{x:,.5f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # =============================================================================
 # CONSTANTES E PARÂMETROS DO ARTIGO
@@ -62,10 +360,6 @@ DOSAGEM_N = 240     # kg N ha⁻¹ (dosagem típica)
 # Fatores de conversão
 FATOR_N_PARA_N2O = 44/28  # 1,571 (conversão de N para N2O)
 GWP_N2O = 273  # Potencial de aquecimento global do N2O (100 anos)
-
-# Preços do carbono (referência)
-PRECO_CARBONO_EUR = 85.50  # €/tCO₂eq (valor de referência)
-PRECO_CARBONO_REAL = 85.50 * 5.5  # Conversão para R$ (€1 = R$5,50)
 
 # =============================================================================
 # FUNÇÕES DE CÁLCULO
@@ -318,6 +612,9 @@ def main():
     
     # Sidebar com parâmetros
     with st.sidebar:
+        # Seção de cotação do carbono - AGORA ATUALIZADA AUTOMATICAMENTE
+        exibir_cotacao_carbono()
+        
         st.header("⚙️ Configuração da Simulação")
         
         # Seleção do estudo base
@@ -363,20 +660,23 @@ def main():
         
         # Configurações avançadas
         with st.expander("🔧 Parâmetros Avançados"):
+            # Usar preço do carbono da cotação automática por padrão
             preco_carbono_eur = st.number_input(
-                "Preço do Carbono (€/tCO₂eq)",
+                "Preço do Carbono (€/tCO₂eq) - Sobrescrever",
                 min_value=10.0,
                 max_value=200.0,
-                value=85.5,
-                step=5.0
+                value=st.session_state.preco_carbono,
+                step=5.0,
+                help="Valor da cotação atual: € " + formatar_br(st.session_state.preco_carbono)
             )
             
             taxa_cambio = st.number_input(
-                "Taxa Câmbio (€ → R$)",
+                "Taxa Câmbio (€ → R$) - Sobrescrever",
                 min_value=4.0,
                 max_value=7.0,
-                value=5.5,
-                step=0.1
+                value=st.session_state.taxa_cambio,
+                step=0.1,
+                help="Taxa atual: 1 Euro = R$ " + formatar_br(st.session_state.taxa_cambio)
             )
             
             taxa_desconto = st.slider(
@@ -518,27 +818,76 @@ def main():
             # =================================================================
             st.header("📈 Resultados da Simulação")
             
+            # NOVA SEÇÃO: VALOR FINANCEIRO DAS EMISSÕES EVITADAS
+            st.subheader("💰 Valor Financeiro das Emissões Evitadas")
+            
+            # Calcular valores financeiros em Euros e Reais
+            valor_emissoes_eur = calcular_valor_creditos(reducao_tco2eq_total, preco_carbono_eur, "€")
+            valor_emissoes_brl = calcular_valor_creditos(reducao_tco2eq_total, preco_carbono_eur, "R$", taxa_cambio)
+            
+            # Primeira linha: Euros
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(
+                    f"Preço Carbono (Euro)", 
+                    f"€ {formatar_br(preco_carbono_eur)}/tCO₂eq",
+                    help="Preço do carbono em Euros"
+                )
+            with col2:
+                st.metric(
+                    "Redução de Emissões", 
+                    f"{formatar_br(reducao_tco2eq_total)} tCO₂eq",
+                    help=f"Total acumulado em {anos_simulacao} anos"
+                )
+            with col3:
+                st.metric(
+                    "Valor das Reduções (Euro)", 
+                    f"€ {formatar_br(valor_emissoes_eur)}",
+                    help=f"Valor das emissões evitadas em Euros"
+                )
+            
+            # Segunda linha: Reais
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(
+                    f"Preço Carbono (R$)", 
+                    f"R$ {formatar_br(preco_carbono_eur * taxa_cambio)}/tCO₂eq",
+                    help="Preço do carbono convertido para Reais"
+                )
+            with col2:
+                st.metric(
+                    "Taxa de Câmbio", 
+                    f"R$ {formatar_br(taxa_cambio)}",
+                    help="1 Euro = R$ " + formatar_br(taxa_cambio)
+                )
+            with col3:
+                st.metric(
+                    "Valor das Reduções (R$)", 
+                    f"R$ {formatar_br(valor_emissoes_brl)}",
+                    help=f"Valor das emissões evitadas em Reais"
+                )
+            
             # Métricas principais
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
                 st.metric(
                     "Redução de Emissões",
-                    f"{reducao_tco2eq_total:,.0f} tCO₂eq",
+                    f"{formatar_br(reducao_tco2eq_total)} tCO₂eq",
                     delta=f"{dados_estudo['reducao_percentual']}%"
                 )
             
             with col2:
                 st.metric(
                     "Receita Carbono Potencial",
-                    f"R$ {receita_carbono_real:,.0f}",
-                    f"€ {receita_carbono_eur:,.0f}"
+                    f"R$ {formatar_br(receita_carbono_real)}",
+                    f"€ {formatar_br(receita_carbono_eur)}"
                 )
             
             with col3:
                 st.metric(
                     "Custo Adicional CRF",
-                    f"R$ {custo_crf - custo_convencional:,.0f}",
+                    f"R$ {formatar_br(custo_crf - custo_convencional)}",
                     f"{((custo_crf_ha/custo_conv_ha)-1)*100:.1f}% mais caro"
                 )
             
@@ -550,7 +899,7 @@ def main():
                 
                 st.metric(
                     "Impacto no Rendimento",
-                    f"{rendimento_crf:,.0f} ton",
+                    f"{formatar_br(rendimento_crf)} ton",
                     delta_rend
                 )
             
@@ -569,17 +918,19 @@ def main():
             axes[0].set_ylabel('Fluxo de Caixa (R$/ha)')
             axes[0].set_title('Fluxo de Caixa Descontado')
             axes[0].grid(True, alpha=0.3)
+            axes[0].yaxis.set_major_formatter(FuncFormatter(br_format))
             
             # Gráfico 2: Distribuição Monte Carlo (VPL)
             axes[1].hist(resultados_mc['vpl'], bins=30, edgecolor='black', alpha=0.7)
             axes[1].axvline(x=0, color='r', linestyle='--', linewidth=2, label='Ponto de Equilíbrio')
             axes[1].axvline(x=np.mean(resultados_mc['vpl']), color='g', linestyle='-', 
-                           linewidth=2, label=f'Média: R$ {np.mean(resultados_mc["vpl"]):,.0f}')
+                           linewidth=2, label=f'Média: R$ {formatar_br(np.mean(resultados_mc["vpl"]))}')
             axes[1].set_xlabel('VPL (R$/ha)')
             axes[1].set_ylabel('Frequência')
             axes[1].set_title('Distribuição do VPL (Monte Carlo)')
             axes[1].legend()
             axes[1].grid(True, alpha=0.3)
+            axes[1].xaxis.set_major_formatter(FuncFormatter(br_format))
             
             # Gráfico 3: Análise de Sensibilidade
             sensibilidade_df = pd.DataFrame({
@@ -592,6 +943,7 @@ def main():
             axes[2].set_xlabel('Índice de Sensibilidade Total (ST)')
             axes[2].set_title('Análise de Sensibilidade (Sobol)')
             axes[2].grid(True, alpha=0.3)
+            axes[2].xaxis.set_major_formatter(FuncFormatter(br_format))
             
             plt.tight_layout()
             st.pyplot(fig)
@@ -613,13 +965,13 @@ def main():
                 
                 st.metric(
                     "VPL Médio",
-                    f"R$ {np.mean(resultados_mc['vpl']):,.0f}/ha",
+                    f"R$ {formatar_br(np.mean(resultados_mc['vpl']))}/ha",
                     help="Valor Presente Líquido médio por hectare"
                 )
                 
                 st.metric(
                     "Intervalo de Confiança 95%",
-                    f"[R$ {np.percentile(resultados_mc['vpl'], 2.5):,.0f}, R$ {np.percentile(resultados_mc['vpl'], 97.5):,.0f}]",
+                    f"[R$ {formatar_br(np.percentile(resultados_mc['vpl'], 2.5))}, R$ {formatar_br(np.percentile(resultados_mc['vpl'], 97.5))}]",
                     help="Intervalo de confiança do VPL"
                 )
             
@@ -627,8 +979,8 @@ def main():
                 st.write("#### Viabilidade Base")
                 st.metric(
                     "VPL do Projeto",
-                    f"R$ {resultados_viabilidade['vpl'] * area_total:,.0f}",
-                    f"R$ {resultados_viabilidade['vpl']:,.0f}/ha"
+                    f"R$ {formatar_br(resultados_viabilidade['vpl'] * area_total)}",
+                    f"R$ {formatar_br(resultados_viabilidade['vpl'])}/ha"
                 )
                 
                 st.metric(
@@ -650,8 +1002,8 @@ def main():
                         
                         st.metric(
                             "Preço Mínimo do Carbono para Viabilidade",
-                            f"€ {preco_minimo_eur:,.0f}/tCO₂eq",
-                            f"R$ {preco_minimo_ha:,.0f}/tCO₂eq"
+                            f"€ {formatar_br(preco_minimo_eur)}/tCO₂eq",
+                            f"R$ {formatar_br(preco_minimo_ha)}/tCO₂eq"
                         )
                     else:
                         st.metric(
@@ -667,10 +1019,10 @@ def main():
             
             # Criar cenários
             cenarios = [
-                {'nome': 'Cenário Atual', 'preco_carbono': 85.5, 'taxa_cambio': 5.5},
-                {'nome': 'Mercado em Expansão', 'preco_carbono': 120, 'taxa_cambio': 5.5},
-                {'nome': 'Alta do Carbono', 'preco_carbono': 150, 'taxa_cambio': 5.5},
-                {'nome': 'Mercado Regulado', 'preco_carbono': 200, 'taxa_cambio': 5.5}
+                {'nome': 'Cenário Atual', 'preco_carbono': preco_carbono_eur, 'taxa_cambio': taxa_cambio},
+                {'nome': 'Mercado em Expansão', 'preco_carbono': 120, 'taxa_cambio': taxa_cambio},
+                {'nome': 'Alta do Carbono', 'preco_carbono': 150, 'taxa_cambio': taxa_cambio},
+                {'nome': 'Mercado Regulado', 'preco_carbono': 200, 'taxa_cambio': taxa_cambio}
             ]
             
             resultados_cenarios = []
@@ -690,15 +1042,14 @@ def main():
                 
                 resultados_cenarios.append({
                     'Cenário': cenario['nome'],
-                    'Preço Carbono (€)': cenario['preco_carbono'],
-                    'VPL Total (R$)': vpl_cenario,
-                    'VPL/ha (R$)': vpl_cenario / area_total,
+                    'Preço Carbono (€)': formatar_br(cenario['preco_carbono']),
+                    'VPL Total (R$)': formatar_br(vpl_cenario),
+                    'VPL/ha (R$)': formatar_br(vpl_cenario / area_total),
                     'Viável': 'SIM' if vpl_cenario > 0 else 'NÃO'
                 })
             
             df_cenarios = pd.DataFrame(resultados_cenarios)
-            st.dataframe(df_cenarios.style.highlight_max(subset=['VPL Total (R$)'], color='lightgreen')
-                         .highlight_min(subset=['VPL Total (R$)'], color='lightcoral'))
+            st.dataframe(df_cenarios)
             
             # =================================================================
             # 9. CONCLUSÕES E RECOMENDAÇÕES
@@ -712,7 +1063,7 @@ def main():
                 st.success(f"""
                 **✅ PROJETO VIÁVEL**
                 
-                - **VPL positivo:** R$ {vpl_ha * area_total:,.0f} (R$ {vpl_ha:,.0f}/ha)
+                - **VPL positivo:** R$ {formatar_br(vpl_ha * area_total)} (R$ {formatar_br(vpl_ha)}/ha)
                 - **Probabilidade de sucesso:** {probabilidade_viabilidade:.1f}%
                 - **Payback:** {resultados_viabilidade['payback']} anos
                 
@@ -726,14 +1077,14 @@ def main():
                 st.warning(f"""
                 **⚠️ PROJETO NÃO VIÁVEL NO CENÁRIO ATUAL**
                 
-                - **VPL negativo:** R$ {vpl_ha * area_total:,.0f} (R$ {vpl_ha:,.0f}/ha)
+                - **VPL negativo:** R$ {formatar_br(vpl_ha * area_total)} (R$ {formatar_br(vpl_ha)}/ha)
                 - **Probabilidade de viabilidade:** {probabilidade_viabilidade:.1f}%
                 - **Fator limitante:** Custo adicional do CRF
                 
                 **Estratégias para viabilizar:**
                 1. Buscar subsídios governamentais para transição
                 2. Negociar desconto com fornecedores de CRF
-                3. Esperar aumento no preço do carbono (viável a partir de € {preco_minimo_eur if 'preco_minimo_eur' in locals() else 'N/A':,.0f}/tCO₂eq)
+                3. Esperar aumento no preço do carbono (viável a partir de € {formatar_br(preco_minimo_eur if 'preco_minimo_eur' in locals() else 0)}/tCO₂eq)
                 4. Focar no aumento de produtividade como principal benefício
                 5. Considerar combinação CRF + ureia para reduzir custos
                 """)
@@ -810,10 +1161,11 @@ def main():
         st.info("""
         ### 💡 Como usar este simulador:
         
-        1. **Selecione o estudo base** na barra lateral (Ji et al. 2013 ou Shakoor et al. 2018)
-        2. **Configure os parâmetros** da sua operação (área, rendimento, preços)
-        3. **Clique em "Executar Simulação Completa"**
-        4. **Analise os resultados** de viabilidade econômica e ambiental
+        1. **Ajuste a cotação do carbono** na barra lateral (atualizada automaticamente)
+        2. **Selecione o estudo base** na barra lateral (Ji et al. 2013 ou Shakoor et al. 2018)
+        3. **Configure os parâmetros** da sua operação (área, rendimento, preços)
+        4. **Clique em "Executar Simulação Completa"**
+        5. **Analise os resultados** de viabilidade econômica e ambiental
         
         ### 📊 O que será analisado:
         - Redução de emissões de N₂O
