@@ -13,16 +13,6 @@ from SALib.sample.sobol import sample
 from SALib.analyze.sobol import analyze
 import requests
 from bs4 import BeautifulSoup
-import locale
-
-# Tentar configurar locale para Português Brasil
-try:
-    locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
-except:
-    try:
-        locale.setlocale(locale.LC_ALL, 'Portuguese_Brazil.1252')
-    except:
-        pass
 
 np.random.seed(50)  # Garante reprodutibilidade
 
@@ -37,80 +27,47 @@ plt.rcParams['font.size'] = 10
 sns.set_style("whitegrid")
 
 # =============================================================================
-# FUNÇÕES AUXILIARES DE FORMATAÇÃO BRASILEIRA
+# FUNÇÕES DE FORMATAÇÃO BRASILEIRA (EXATAMENTE COMO NO SCRIPTV2)
 # =============================================================================
 
-def formatar_numero_brasileiro(valor, casas_decimais=2):
+# Função para formatar números no padrão brasileiro
+def formatar_br(numero):
     """
     Formata números no padrão brasileiro: 1.234,56
     """
-    if valor is None or pd.isna(valor):
+    if pd.isna(numero):
         return "N/A"
     
-    try:
-        # Converter para float se for string
-        if isinstance(valor, str):
-            valor = float(valor.replace(',', '.'))
-        
-        # Arredondar para o número de casas decimais
-        valor_arredondado = round(float(valor), casas_decimais)
-        
-        # Formatar com separador de milhar e decimal
-        if casas_decimais == 0:
-            formato = "{:,.0f}"
-        else:
-            formato = "{:,.%df}" % casas_decimais
-        
-        # Aplicar formatação e substituir vírgula por ponto e ponto por vírgula
-        valor_formatado = formato.format(valor_arredondado)
-        
-        # Substituir separadores
-        if ',' in valor_formatado and '.' in valor_formatado:
-            # Tem ambos separadores (milhar e decimal)
-            valor_formatado = valor_formatado.replace(',', 'X').replace('.', ',').replace('X', '.')
-        elif ',' in valor_formatado:
-            # Tem apenas vírgula (separador decimal em inglês)
-            valor_formatado = valor_formatado.replace(',', ',')
-        
-        return valor_formatado
-    except (ValueError, TypeError):
-        return str(valor)
-
-def formatar_percentual(valor):
-    """
-    Formata percentuais: 14,5%
-    """
-    if valor is None or pd.isna(valor):
-        return "N/A"
+    # Arredonda para 2 casas decimais
+    numero = round(numero, 2)
     
-    try:
-        if isinstance(valor, str):
-            valor = float(valor.replace(',', '.'))
-        
-        valor_arredondado = round(float(valor), 1)
-        return f"{formatar_numero_brasileiro(valor_arredondado, 1)}%"
-    except (ValueError, TypeError):
-        return str(valor)
+    # Formata como string e substitui o ponto pela vírgula
+    return f"{numero:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# Funções de formatação para matplotlib
-def formatador_br_milhares(x, pos):
+# Função de formatação para os gráficos
+def br_format(x, pos):
     """
-    Formata números para eixos de gráficos (padrão brasileiro para milhares)
+    Função de formatação para eixos de gráficos (padrão brasileiro)
     """
     if x == 0:
         return "0"
-    elif abs(x) < 0.01:
-        return f"{x:.1e}".replace('.', ',')
-    elif abs(x) >= 1000:
-        return f"{x:,.0f}".replace(',', 'X').replace('.', ',').replace('X', '.')
-    else:
-        return f"{x:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    
+    # Para valores muito pequenos, usa notação científica
+    if abs(x) < 0.01:
+        return f"{x:.1e}".replace(".", ",")
+    
+    # Para valores grandes, formata com separador de milhar
+    if abs(x) >= 1000:
+        return f"{x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    # Para valores menores, mostra duas casas decimais
+    return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def formatador_br_decimal(x, pos):
+def br_format_5_dec(x, pos):
     """
-    Formata números para eixos de gráficos (padrão brasileiro para decimais)
+    Função de formatação para eixos de gráficos (padrão brasileiro com 5 decimais)
     """
-    return f"{x:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    return f"{x:,.5f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # =============================================================================
 # FUNÇÕES DE COTAÇÃO AUTOMÁTICA DO CARBONO E CÂMBIO
@@ -284,14 +241,14 @@ def exibir_cotacao_carbono():
     # Exibe cotação atual do carbono
     st.sidebar.metric(
         label=f"Preço do Carbono (tCO₂eq)",
-        value=f"{st.session_state.moeda_carbono} {formatar_numero_brasileiro(st.session_state.preco_carbono, 2)}",
+        value=f"{st.session_state.moeda_carbono} {formatar_br(st.session_state.preco_carbono)}",
         help=f"Fonte: {st.session_state.fonte_cotacao}"
     )
     
     # Exibe cotação atual do Euro
     st.sidebar.metric(
         label="Euro (EUR/BRL)",
-        value=f"{st.session_state.moeda_real} {formatar_numero_brasileiro(st.session_state.taxa_cambio, 2)}",
+        value=f"{st.session_state.moeda_real} {formatar_br(st.session_state.taxa_cambio)}",
         help="Cotação do Euro em Reais Brasileiros"
     )
     
@@ -300,7 +257,7 @@ def exibir_cotacao_carbono():
     
     st.sidebar.metric(
         label=f"Carbono em Reais (tCO₂eq)",
-        value=f"R$ {formatar_numero_brasileiro(preco_carbono_reais, 2)}",
+        value=f"R$ {formatar_br(preco_carbono_reais)}",
         help="Preço do carbono convertido para Reais Brasileiros"
     )
     
@@ -309,9 +266,9 @@ def exibir_cotacao_carbono():
         st.markdown(f"""
         **📊 Cotações Atuais:**
         - **Fonte do Carbono:** {st.session_state.fonte_cotacao}
-        - **Preço Atual:** {st.session_state.moeda_carbono} {formatar_numero_brasileiro(st.session_state.preco_carbono, 2)}/tCO₂eq
-        - **Câmbio EUR/BRL:** 1 Euro = R$ {formatar_numero_brasileiro(st.session_state.taxa_cambio, 2)}
-        - **Carbono em Reais:** R$ {formatar_numero_brasileiro(preco_carbono_reais, 2)}/tCO₂eq
+        - **Preço Atual:** {st.session_state.moeda_carbono} {formatar_br(st.session_state.preco_carbono)}/tCO₂eq
+        - **Câmbio EUR/BRL:** 1 Euro = R$ {formatar_br(st.session_state.taxa_cambio)}
+        - **Carbono em Reais:** R$ {formatar_br(preco_carbono_reais)}/tCO₂eq
         
         **🌍 Mercado de Referência:**
         - European Union Allowances (EUA)
@@ -697,7 +654,7 @@ def main():
             step=50
         )
         
-        # Configurações avançadas (agora sem os campos duplicados de carbono e câmbio)
+        # Configurações avançadas
         with st.expander("🔧 Parâmetros Avançados"):
             taxa_desconto = st.slider(
                 "Taxa de Desconto (%)",
@@ -733,7 +690,6 @@ def main():
                 emissao_crf_kg = dados_estudo['emissao_crf']
             
             # Calcular redução de emissões
-        
             reducao_kg_N = emissao_conv_kg - emissao_crf_kg
             reducao_tco2eq_total, reducao_tco2eq_ha = converter_emissao_para_tCO2eq(reducao_kg_N, area_total)
             
@@ -844,35 +800,35 @@ def main():
             
             with col1:
                 st.metric(
-                    "Emissões Evitadas",
-                    f"{formatar_numero_brasileiro(reducao_tco2eq_total, 0)} tCO₂eq",
-                    delta=f"{formatar_numero_brasileiro(dados_estudo['reducao_percentual'], 1)}%"
+                    "Redução de Emissões",
+                    f"{formatar_br(reducao_tco2eq_total)} tCO₂eq",
+                    delta=f"{formatar_br(dados_estudo['reducao_percentual'])}%"
                 )
             
             with col2:
                 st.metric(
                     "Receita Carbono Potencial",
-                    f"R$ {formatar_numero_brasileiro(receita_carbono_real, 0)}",
-                    f"€ {formatar_numero_brasileiro(receita_carbono_eur, 0)}",
-                    help=f"Preço do carbono: €{formatar_numero_brasileiro(st.session_state.preco_carbono, 2)}/tCO₂eq"
+                    f"R$ {formatar_br(receita_carbono_real)}",
+                    f"€ {formatar_br(receita_carbono_eur)}",
+                    help=f"Preço do carbono: €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq"
                 )
             
             with col3:
                 st.metric(
                     "Custo Adicional CRF",
-                    f"R$ {formatar_numero_brasileiro(custo_crf - custo_convencional, 0)}",
-                    f"{formatar_numero_brasileiro(((custo_crf_ha/custo_conv_ha)-1)*100, 1)}% mais caro"
+                    f"R$ {formatar_br(custo_crf - custo_convencional)}",
+                    f"{formatar_br(((custo_crf_ha/custo_conv_ha)-1)*100)}% mais caro"
                 )
             
             with col4:
                 if estudo_selecionado == 'ji_et_al':
-                    delta_rend = f"{formatar_numero_brasileiro(dados_estudo['reducao_rendimento'], 1)}%"
+                    delta_rend = f"{formatar_br(dados_estudo['reducao_rendimento'])}%"
                 else:
-                    delta_rend = f"+{formatar_numero_brasileiro(dados_estudo['aumento_rendimento'], 1)}%"
+                    delta_rend = f"+{formatar_br(dados_estudo['aumento_rendimento'])}%"
                 
                 st.metric(
                     "Impacto no Rendimento",
-                    f"{formatar_numero_brasileiro(rendimento_crf, 0)} ton",
+                    f"{formatar_br(rendimento_crf)} ton",
                     delta_rend
                 )
             
@@ -885,35 +841,28 @@ def main():
             
             # Gráfico 1: Fluxo de Caixa
             anos_array = list(range(1, anos_simulacao + 1))
-            fluxo_formatado = [formatar_numero_brasileiro(f, 0) for f in resultados_viabilidade['fluxo_caixa']]
-            
-            # Criar barras
-            bars = axes[0].bar(anos_array, resultados_viabilidade['fluxo_caixa'])
+            axes[0].bar(anos_array, resultados_viabilidade['fluxo_caixa'])
             axes[0].axhline(y=0, color='r', linestyle='--', alpha=0.5)
             axes[0].set_xlabel('Ano')
             axes[0].set_ylabel('Fluxo de Caixa (R$/ha)')
             axes[0].set_title('Fluxo de Caixa Descontado')
             axes[0].grid(True, alpha=0.3)
-            
-            # Formatar eixo Y com padrão brasileiro
-            axes[0].yaxis.set_major_formatter(FuncFormatter(formatador_br_milhares))
+            axes[0].yaxis.set_major_formatter(FuncFormatter(br_format))
             
             # Gráfico 2: Distribuição Monte Carlo (VPL)
             axes[1].hist(resultados_mc['vpl'], bins=30, edgecolor='black', alpha=0.7)
             axes[1].axvline(x=0, color='r', linestyle='--', linewidth=2, label='Ponto de Equilíbrio')
             
-            # Calcular média formatada
             media_vpl = np.mean(resultados_mc['vpl'])
-            media_vpl_formatada = formatar_numero_brasileiro(media_vpl, 0)
             axes[1].axvline(x=media_vpl, color='g', linestyle='-', 
-                           linewidth=2, label=f'Média: R$ {media_vpl_formatada}')
+                           linewidth=2, label=f'Média: R$ {formatar_br(media_vpl)}')
             
             axes[1].set_xlabel('VPL (R$/ha)')
             axes[1].set_ylabel('Frequência')
             axes[1].set_title('Distribuição do VPL (Monte Carlo)')
             axes[1].legend()
             axes[1].grid(True, alpha=0.3)
-            axes[1].xaxis.set_major_formatter(FuncFormatter(formatador_br_milhares))
+            axes[1].xaxis.set_major_formatter(FuncFormatter(br_format))
             
             # Gráfico 3: Análise de Sensibilidade
             sensibilidade_df = pd.DataFrame({
@@ -926,7 +875,7 @@ def main():
             axes[2].set_xlabel('Índice de Sensibilidade Total (ST)')
             axes[2].set_title('Análise de Sensibilidade (Sobol)')
             axes[2].grid(True, alpha=0.3)
-            axes[2].xaxis.set_major_formatter(FuncFormatter(formatador_br_decimal))
+            axes[2].xaxis.set_major_formatter(FuncFormatter(br_format))
             
             plt.tight_layout()
             st.pyplot(fig)
@@ -940,22 +889,22 @@ def main():
             
             with col1:
                 st.write("#### Monte Carlo (1000 simulações)")
+                probabilidade = np.mean(resultados_mc['viabilidade']) * 100
                 st.metric(
                     "Probabilidade de Viabilidade",
-                    f"{formatar_numero_brasileiro(np.mean(resultados_mc['viabilidade']) * 100, 1)}%",
+                    f"{formatar_br(probabilidade)}%",
                     help="Percentual de simulações onde VPL > 0"
                 )
                 
                 st.metric(
                     "VPL Médio",
-                    f"R$ {formatar_numero_brasileiro(np.mean(resultados_mc['vpl']), 0)}/ha",
+                    f"R$ {formatar_br(np.mean(resultados_mc['vpl']))}/ha",
                     help="Valor Presente Líquido médio por hectare"
                 )
                 
-                # Calcular intervalo de confiança formatado
                 perc_2_5 = np.percentile(resultados_mc['vpl'], 2.5)
                 perc_97_5 = np.percentile(resultados_mc['vpl'], 97.5)
-                intervalo_texto = f"[R$ {formatar_numero_brasileiro(perc_2_5, 0)}, R$ {formatar_numero_brasileiro(perc_97_5, 0)}]"
+                intervalo_texto = f"[R$ {formatar_br(perc_2_5)}, R$ {formatar_br(perc_97_5)}]"
                 
                 st.metric(
                     "Intervalo de Confiança 95%",
@@ -967,8 +916,8 @@ def main():
                 st.write("#### Viabilidade Base")
                 st.metric(
                     "VPL do Projeto",
-                    f"R$ {formatar_numero_brasileiro(resultados_viabilidade['vpl'] * area_total, 0)}",
-                    f"R$ {formatar_numero_brasileiro(resultados_viabilidade['vpl'], 0)}/ha"
+                    f"R$ {formatar_br(resultados_viabilidade['vpl'] * area_total)}",
+                    f"R$ {formatar_br(resultados_viabilidade['vpl'])}/ha"
                 )
                 
                 st.metric(
@@ -990,8 +939,8 @@ def main():
                         
                         st.metric(
                             "Preço Mínimo do Carbono para Viabilidade",
-                            f"€ {formatar_numero_brasileiro(preco_minimo_eur, 0)}/tCO₂eq",
-                            f"R$ {formatar_numero_brasileiro(preco_minimo_ha, 0)}/tCO₂eq",
+                            f"€ {formatar_br(preco_minimo_eur)}/tCO₂eq",
+                            f"R$ {formatar_br(preco_minimo_ha)}/tCO₂eq",
                             help="Preço necessário para tornar o projeto viável"
                         )
                     else:
@@ -1034,9 +983,9 @@ def main():
                 
                 resultados_cenarios.append({
                     'Cenário': cenario['nome'],
-                    'Preço Carbono (€)': formatar_numero_brasileiro(cenario['preco_carbono'], 2),
-                    'VPL Total (R$)': formatar_numero_brasileiro(vpl_cenario, 0),
-                    'VPL/ha (R$)': formatar_numero_brasileiro(vpl_cenario / area_total, 0),
+                    'Preço Carbono (€)': formatar_br(cenario['preco_carbono']),
+                    'VPL Total (R$)': formatar_br(vpl_cenario),
+                    'VPL/ha (R$)': formatar_br(vpl_cenario / area_total),
                     'Viável': 'SIM' if vpl_cenario > 0 else 'NÃO'
                 })
             
@@ -1083,10 +1032,10 @@ def main():
                 st.success(f"""
                 **✅ PROJETO VIÁVEL**
                 
-                - **VPL positivo:** R$ {formatar_numero_brasileiro(vpl_ha * area_total, 0)} (R$ {formatar_numero_brasileiro(vpl_ha, 0)}/ha)
-                - **Probabilidade de sucesso:** {formatar_numero_brasileiro(probabilidade_viabilidade, 1)}%
+                - **VPL positivo:** R$ {formatar_br(vpl_ha * area_total)} (R$ {formatar_br(vpl_ha)}/ha)
+                - **Probabilidade de sucesso:** {formatar_br(probabilidade_viabilidade)}%
                 - **Payback:** {resultados_viabilidade['payback']} anos
-                - **Preço atual do carbono:** €{formatar_numero_brasileiro(st.session_state.preco_carbono, 2)}/tCO₂eq
+                - **Preço atual do carbono:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
                 
                 **Recomendações:**
                 1. Implementar projeto piloto em área reduzida
@@ -1108,15 +1057,15 @@ def main():
                 st.warning(f"""
                 **⚠️ PROJETO NÃO VIÁVEL NO CENÁRIO ATUAL**
                 
-                - **VPL negativo:** R$ {formatar_numero_brasileiro(vpl_ha * area_total, 0)} (R$ {formatar_numero_brasileiro(vpl_ha, 0)}/ha)
-                - **Probabilidade de viabilidade:** {formatar_numero_brasileiro(probabilidade_viabilidade, 1)}%
-                - **Preço atual do carbono:** €{formatar_numero_brasileiro(st.session_state.preco_carbono, 2)}/tCO₂eq
+                - **VPL negativo:** R$ {formatar_br(vpl_ha * area_total)} (R$ {formatar_br(vpl_ha)}/ha)
+                - **Probabilidade de viabilidade:** {formatar_br(probabilidade_viabilidade)}%
+                - **Preço atual do carbono:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
                 - **Fator limitante:** Custo adicional do CRF
                 
                 **Estratégias para viabilizar:**
                 1. Buscar subsídios governamentais para transição
                 2. Negociar desconto com fornecedores de CRF
-                3. Esperar aumento no preço do carbono (viável a partir de € {formatar_numero_brasileiro(preco_minimo_eur if 'preco_minimo_eur' in locals() else 0, 0)}/tCO₂eq)
+                3. Esperar aumento no preço do carbono (viável a partir de € {formatar_br(preco_minimo_eur if 'preco_minimo_eur' in locals() else 0)}/tCO₂eq)
                 4. Focar no aumento de produtividade como principal benefício
                 5. Considerar combinação CRF + ureia para reduzir custos
                 """)
@@ -1126,18 +1075,18 @@ def main():
                 if estudo_selecionado == 'ji_et_al':
                     st.info(f"""
                     **Ji et al. (2013) - Sistema Arroz:**
-                    - CRF reduz emissões em {formatar_numero_brasileiro(dados_estudo['reducao_percentual'], 1)}%, mas reduz rendimento em {formatar_numero_brasileiro(abs(dados_estudo['reducao_rendimento']), 1)}%
+                    - CRF reduz emissões em {formatar_br(dados_estudo['reducao_percentual'])}%, mas reduz rendimento em {formatar_br(abs(dados_estudo['reducao_rendimento']))}%
                     - Timing da aeração (MSA) é crítico: MSA em D30 otimiza redução
                     - Necessário compensar perda de rendimento com valor agregado ou carbono
-                    - **Preço do carbono atual:** €{formatar_numero_brasileiro(st.session_state.preco_carbono, 2)}/tCO₂eq
+                    - **Preço do carbono atual:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
                     """)
                 else:
                     st.info(f"""
                     **Shakoor et al. (2018) - Sistema Arroz-Trigo:**
-                    - CRF reduz emissões em {formatar_numero_brasileiro(dados_estudo['reducao_percentual'], 1)}% e aumenta rendimento em {formatar_numero_brasileiro(dados_estudo['aumento_rendimento'], 1)}%
+                    - CRF reduz emissões em {formatar_br(dados_estudo['reducao_percentual'])}% e aumenta rendimento em {formatar_br(dados_estudo['aumento_rendimento'])}%
                     - Sistema de rotação otimiza benefícios
                     - Viabilidade mais provável devido ao duplo benefício
-                    - **Preço do carbono atual:** €{formatar_numero_brasileiro(st.session_state.preco_carbono, 2)}/tCO₂eq
+                    - **Preço do carbono atual:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
                     """)
     
     else:
@@ -1169,10 +1118,10 @@ def main():
                 'Estudo': dados['nome'],
                 'Cultura': dados['cultura'],
                 'Sistema': dados['sistema'],
-                'Emissão Convencional': f"{formatar_numero_brasileiro(dados['emissao_convencional'], 2)} {dados['area']}",
-                'Emissão CRF': f"{formatar_numero_brasileiro(dados['emissao_crf'], 2)} {dados['area']}",
-                'Redução': f"{formatar_numero_brasileiro(dados['reducao_percentual'], 1)}%",
-                'Impacto Rendimento': f"{formatar_numero_brasileiro(dados.get('reducao_rendimento', dados.get('aumento_rendimento', 0)), 1)}%"
+                'Emissão Convencional': f"{formatar_br(dados['emissao_convencional'])} {dados['area']}",
+                'Emissão CRF': f"{formatar_br(dados['emissao_crf'])} {dados['area']}",
+                'Redução': f"{formatar_br(dados['reducao_percentual'])}%",
+                'Impacto Rendimento': f"{formatar_br(dados.get('reducao_rendimento', dados.get('aumento_rendimento', 0)))}%"
             })
         
         df_comparacao = pd.DataFrame(comparacao_data)
