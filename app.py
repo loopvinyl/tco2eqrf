@@ -602,9 +602,7 @@ def analise_sensibilidade_sobol_completa(params_base, n_amostras=100):
 # =============================================================================
 
 def main():
-    # Inicializar a variável de mensagem de erro para evitar UnboundLocalError
-    error_message = None
-    
+    sensibilidade_significativa = pd.DataFrame()
     try:
         st.title("🌾 Simulador de Fertilizantes Nitrogenados")
         st.markdown("""
@@ -728,7 +726,8 @@ def main():
         sensibilidade_significativa = pd.DataFrame()  # Inicializar variável
         
         if executar_simulacao:
-            with st.spinner('Executando simulação...'):
+    sensibilidade_significativa = pd.DataFrame()
+    with st.spinner('Executando simulação...'):
                 # Inicializar variáveis com valores padrão
                 emissao_conv_kg = 0
                 emissao_crf_kg = 0
@@ -1122,12 +1121,7 @@ def main():
             st.dataframe(df_comparacao)
     
     except Exception as error:
-        # Armazenar a mensagem de erro na variável previamente inicializada
-        error_message = f"Ocorreu um erro no aplicativo: {str(error)}"
-    
-    # Exibir a mensagem de erro apenas se houve um erro
-    if error_message is not None:
-        st.error(error_message)
+        st.error(f"Ocorreu um erro no aplicativo: {str(error)}")
         st.info("""
         **Solução de problemas:**
         1. Tente recarregar a página
