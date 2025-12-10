@@ -249,6 +249,8 @@ def inicializar_session_state():
         st.session_state.cotacao_carregada = False
     if 'executar_simulacao' not in st.session_state:
         st.session_state.executar_simulacao = False
+    if 'estudo_selecionado' not in st.session_state:
+        st.session_state.estudo_selecionado = 'ji_et_al'
 
 # Chamar a inicialização
 inicializar_session_state()
@@ -311,7 +313,10 @@ DADOS_ARTIGOS = {
         'reducao_percentual': 14.5,
         'reducao_rendimento': -5.0,  # % redução no rendimento
         'cultura': 'Arroz',
-        'sistema': 'Monocultura'
+        'sistema': 'Monocultura',
+        'rendimento_base': 7.0,  # ton/ha (valor típico para arroz)
+        'preco_produto': 1500,  # R$/ton (preço médio do arroz)
+        'unidade_rendimento': 'ton/ha (arroz)'
     },
     'shakoor_et_al': {
         'nome': 'Shakoor et al. (2018) - Sistema Arroz-Trigo',
@@ -322,7 +327,10 @@ DADOS_ARTIGOS = {
         'reducao_percentual': 26.5,
         'aumento_rendimento': 3.0,  # % aumento no rendimento
         'cultura': 'Arroz-Trigo',
-        'sistema': 'Rotação'
+        'sistema': 'Rotação',
+        'rendimento_base': 10.0,  # ton/ha (soma arroz + trigo)
+        'preco_produto': 1350,  # R$/ton (preço médio ponderado)
+        'unidade_rendimento': 'ton/ha (arroz + trigo)'
     }
 }
 
@@ -595,16 +603,59 @@ def main():
         estudo_selecionado = st.selectbox(
             "📚 Estudo de Referência",
             options=list(DADOS_ARTIGOS.keys()),
-            format_func=lambda x: DADOS_ARTIGOS[x]['nome']
+            format_func=lambda x: DADOS_ARTIGOS[x]['nome'],
+            key='estudo_selectbox'
         )
         
+        # Atualizar session state quando o estudo muda
+        if estudo_selecionado != st.session_state.estudo_selecionado:
+            st.session_state.estudo_selecionado = estudo_selecionado
+            st.rerun()
+        
+        # Obter dados do estudo selecionado
+        dados_estudo = DADOS_ARTIGOS[estudo_selecionado]
+        
+        # Mostrar informações do estudo
+        with st.expander(f"📖 {dados_estudo['cultura']}"):
+            st.write(f"**Sistema:** {dados_estudo['sistema']}")
+            st.write(f"**Redução de emissões:** {dados_estudo['reducao_percentual']}%")
+            if estudo_selecionado == 'ji_et_al':
+                st.write(f"**Impacto no rendimento:** {dados_estudo['reducao_rendimento']}%")
+            else:
+                st.write(f"**Impacto no rendimento:** +{dados_estudo['aumento_rendimento']}%")
+        
         # Parâmetros gerais
+        st.subheader("📍 Parâmetros da Cultura")
+        
+        # Rendimento base (ajustado conforme estudo)
+        rendimento_base = st.slider(
+            f"Rendimento Base ({dados_estudo['unidade_rendimento']})",
+            min_value=float(max(1.0, dados_estudo['rendimento_base'] * 0.5)),
+            max_value=float(dados_estudo['rendimento_base'] * 2.0),
+            value=float(dados_estudo['rendimento_base']),
+            step=0.5,
+            help=f"Rendimento médio com fertilizante convencional - {dados_estudo['cultura']}"
+        )
+        
+        # Preço do produto (ajustado conforme estudo)
+        preco_produto = st.slider(
+            f"Preço do {dados_estudo['cultura'].split('-')[0]} (R$/ton)",
+            min_value=int(dados_estudo['preco_produto'] * 0.5),
+            max_value=int(dados_estudo['preco_produto'] * 2.0),
+            value=int(dados_estudo['preco_produto']),
+            step=50,
+            help=f"Preço de mercado do produto - {dados_estudo['cultura']}"
+        )
+        
+        st.subheader("🏢 Parâmetros da Operação")
+        
         area_total = st.slider(
             "Área Total (hectares)",
             min_value=10,
             max_value=10000,
             value=100,
-            step=10
+            step=10,
+            help="Área total cultivada"
         )
         
         anos_simulacao = st.slider(
@@ -612,33 +663,17 @@ def main():
             min_value=5,
             max_value=30,
             value=10,
-            step=5
+            step=5,
+            help="Horizonte temporal da análise"
         )
         
-        rendimento_base = st.slider(
-            "Rendimento Base (ton/ha/ano)",
-            min_value=2.0,
-            max_value=10.0,
-            value=5.0,
-            step=0.5,
-            help="Rendimento médio com fertilizante convencional"
-        )
-        
-        preco_produto = st.slider(
-            "Preço do Produto (R$/ton)",
-            min_value=500,
-            max_value=2000,
-            value=1000,
-            step=50
-        )
-        
-        # Taxa de desconto
         taxa_desconto = st.slider(
             "Taxa de Desconto (%)",
             min_value=1.0,
             max_value=15.0,
             value=6.0,
-            step=0.5
+            step=0.5,
+            help="Taxa utilizada para descontar fluxos futuros"
         ) / 100
         
         # Botão de execução
@@ -655,8 +690,6 @@ def main():
             # =================================================================
             # 1. CÁLCULOS BÁSICOS
             # =================================================================
-            dados_estudo = DADOS_ARTIGOS[estudo_selecionado]
-            
             # Obter emissões
             if dados_estudo['area'] == 'm²':
                 # Converter de mg N m⁻² para kg N ha⁻¹
@@ -772,6 +805,17 @@ def main():
             # =================================================================
             st.header("📈 Resultados da Simulação")
             
+            # Cabeçalho com informações do estudo
+            st.info(f"""
+            **📋 Configuração da Simulação:**
+            - **Estudo:** {dados_estudo['nome']}
+            - **Cultura:** {dados_estudo['cultura']}
+            - **Sistema:** {dados_estudo['sistema']}
+            - **Área:** {formatar_br(area_total)} ha
+            - **Período:** {anos_simulacao} anos
+            - **Taxa de desconto:** {formatar_br(taxa_desconto * 100)}%
+            """)
+            
             # NOVA SEÇÃO: VALOR FINANCEIRO DAS EMISSÕES EVITADAS
             st.subheader("💰 Valor Financeiro das Emissões Evitadas")
             
@@ -822,6 +866,8 @@ def main():
                 )
             
             # Métricas principais
+            st.subheader("📊 Impactos da Substituição")
+            
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
@@ -848,13 +894,16 @@ def main():
             with col4:
                 if estudo_selecionado == 'ji_et_al':
                     delta_rend = f"{dados_estudo['reducao_rendimento']}%"
+                    ajuda_rend = f"Redução no rendimento do {dados_estudo['cultura']}"
                 else:
                     delta_rend = f"+{dados_estudo['aumento_rendimento']}%"
+                    ajuda_rend = f"Aumento no rendimento do {dados_estudo['cultura']}"
                 
                 st.metric(
-                    "Impacto no Rendimento",
+                    f"Impacto no Rendimento ({dados_estudo['cultura']})",
                     f"{formatar_br(rendimento_crf)} ton",
-                    delta_rend
+                    delta_rend,
+                    help=ajuda_rend
                 )
             
             # =================================================================
@@ -1022,7 +1071,7 @@ def main():
                 - **Probabilidade de sucesso:** {probabilidade_viabilidade:.1f}%
                 - **Payback:** {resultados_viabilidade['payback']} anos
                 
-                **Recomendações:**
+                **Recomendações para {dados_estudo['cultura']}:**
                 1. Implementar projeto piloto em área reduzida
                 2. Buscar certificação VCS ou Gold Standard
                 3. Negociar contratos de venda antecipada de créditos
@@ -1047,30 +1096,13 @@ def main():
                 - **Probabilidade de viabilidade:** {probabilidade_viabilidade:.1f}%
                 - **Fator limitante:** Custo adicional do CRF
                 
-                **Estratégias para viabilizar:**
+                **Estratégias para viabilizar {dados_estudo['cultura']}:**
                 1. Buscar subsídios governamentais para transição
                 2. Negociar desconto com fornecedores de CRF
                 3. Esperar aumento no preço do carbono (viável a partir de € {formatar_br(preco_minimo_eur)}/tCO₂eq)
                 4. Focar no aumento de produtividade como principal benefício
                 5. Considerar combinação CRF + ureia para reduzir custos
                 """)
-            
-            # Adicionar insights específicos por estudo
-            with st.expander("📚 Insights Específicos por Estudo"):
-                if estudo_selecionado == 'ji_et_al':
-                    st.info("""
-                    **Ji et al. (2013) - Sistema Arroz:**
-                    - CRF reduz emissões em 14.5%, mas reduz rendimento em 5%
-                    - Timing da aeração (MSA) é crítico: MSA em D30 otimiza redução
-                    - Necessário compensar perda de rendimento com valor agregado ou carbono
-                    """)
-                else:
-                    st.info("""
-                    **Shakoor et al. (2018) - Sistema Arroz-Trigo:**
-                    - CRF reduz emissões em 26.5% e aumenta rendimento em 3%
-                    - Sistema de rotação otimiza benefícios
-                    - Viabilidade mais provável devido ao duplo benefício
-                    """)
     
     else:
         # Tela inicial
@@ -1101,10 +1133,10 @@ def main():
                 'Estudo': dados['nome'],
                 'Cultura': dados['cultura'],
                 'Sistema': dados['sistema'],
-                'Emissão Convencional': f"{dados['emissao_convencional']} {dados['area']}",
-                'Emissão CRF': f"{dados['emissao_crf']} {dados['area']}",
-                'Redução': f"{dados['reducao_percentual']}%",
-                'Impacto Rendimento': f"{dados.get('reducao_rendimento', dados.get('aumento_rendimento', 0))}%"
+                'Redução de Emissões': f"{dados['reducao_percentual']}%",
+                'Impacto no Rendimento': f"{dados.get('reducao_rendimento', dados.get('aumento_rendimento', 0))}%",
+                'Rendimento Base': f"{dados['rendimento_base']} {dados['unidade_rendimento']}",
+                'Preço do Produto': f"R$ {formatar_br(dados['preco_produto'])}/ton"
             })
         
         df_comparacao = pd.DataFrame(comparacao_data)
