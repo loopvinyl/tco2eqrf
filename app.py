@@ -470,111 +470,125 @@ def analise_viabilidade_economica(dados_simulacao):
     return resultados
 
 # =============================================================================
-# FUNÇÕES DE SIMULAÇÃO MONTE CARLO
+# FUNÇÕES DE SIMULAÇÃO MONTE CARLO (SEPARADAS COMO NO SCRIPTV2)
 # =============================================================================
 
-def simulacao_monte_carlo(params_base, n_simulacoes=1000):
+def gerar_parametros_mc(n):
     """
-    Executa simulação Monte Carlo para análise de incerteza
+    Gera parâmetros para simulação Monte Carlo
     """
-    resultados = {
-        'reducoes_tco2eq': [],
-        'vpl': [],
-        'viabilidade': []
-    }
+    np.random.seed(50)
     
-    for i in range(n_simulacoes):
-        # Adicionar incerteza aos parâmetros
-        params = params_base.copy()
-        
-        # Incerteza nas emissões (±20%)
-        params['emissao_convencional'] = np.random.normal(
-            params_base['emissao_convencional'],
-            params_base['emissao_convencional'] * 0.2
-        )
-        params['emissao_crf'] = np.random.normal(
-            params_base['emissao_crf'],
-            params_base['emissao_crf'] * 0.2
-        )
-        
-        # Incerteza no preço do carbono (±30%)
-        params['preco_carbono'] = np.random.normal(
-            params_base['preco_carbono'],
-            params_base['preco_carbono'] * 0.3
-        )
-        
-        # Incerteza no rendimento (±10%)
-        if 'aumento_rendimento' in params:
-            params['aumento_rendimento'] = np.random.normal(
-                params_base['aumento_rendimento'],
-                abs(params_base['aumento_rendimento']) * 0.1
-            )
-        
-        # Recalcular resultados
-        reducao_ha = converter_emissao_para_tCO2eq(
-            params['emissao_convencional'] - params['emissao_crf'],
-            1  # 1 hectare para cálculo por ha
-        )[0]
-        
-        receita_ha = calcular_receita_carbono(
-            reducao_ha,
-            params['preco_carbono'],
-            params.get('taxa_cambio', 5.5)
-        )[0]
-        
-        custo_convencional_ha = calcular_custo_fertilizante('convencional', 1)[1]
-        custo_crf_ha = calcular_custo_fertilizante('crf', 1)[1]
-        custo_adicional_ha = custo_crf_ha - custo_convencional_ha
-        
-        # Benefício de rendimento (se aplicável)
-        beneficio_rendimento_ha = 0
-        if params.get('estudo') == 'shakoor_et_al':
-            rendimento_base = params.get('rendimento_base', 5)  # ton/ha
-            aumento = params.get('aumento_rendimento', 3) / 100
-            beneficio_rendimento_ha = rendimento_base * aumento * params.get('preco_produto', 1000)
-        
-        # Fluxo anual por hectare
-        fluxo_anual_ha = receita_ha + beneficio_rendimento_ha - custo_adicional_ha
-        
-        # VPL simplificado (5 anos, taxa 6%)
-        vpl = sum([fluxo_anual_ha / (1.06 ** (ano+1)) for ano in range(5)])
-        
-        resultados['reducoes_tco2eq'].append(reducao_ha)
-        resultados['vpl'].append(vpl)
-        resultados['viabilidade'].append(1 if vpl > 0 else 0)
+    # Variações nos parâmetros principais
+    preco_carbono_vals = np.random.normal(
+        st.session_state.preco_carbono,
+        st.session_state.preco_carbono * 0.3,  # 30% de variação
+        n
+    )
     
-    return resultados
+    reducao_emissao_vals = np.random.normal(
+        dados_simulacao['reducao_kg_N'],
+        dados_simulacao['reducao_kg_N'] * 0.2,  # 20% de variação
+        n
+    )
+    
+    if dados_simulacao['estudo'] == 'ji_et_al':
+        impacto_rendimento_vals = np.random.normal(
+            dados_simulacao['reducao_rendimento'],
+            abs(dados_simulacao['reducao_rendimento']) * 0.1,
+            n
+        )
+    else:
+        impacto_rendimento_vals = np.random.normal(
+            dados_simulacao['aumento_rendimento'],
+            abs(dados_simulacao['aumento_rendimento']) * 0.1,
+            n
+        )
+    
+    return preco_carbono_vals, reducao_emissao_vals, impacto_rendimento_vals
 
-def analise_sensibilidade_sobol(problema, n_amostras=100):
+def executar_simulacao_mc(parametros):
     """
-    Análise de sensibilidade usando método Sobol
+    Executa uma simulação Monte Carlo individual
     """
-    # Definir parâmetros para análise
-    param_values = sample(problema, n_amostras)
+    preco_carbono, reducao_emissao, impacto_rendimento = parametros
     
-    # Função modelo para Sobol
-    def modelo_sobol(parametros):
-        # Extrair parâmetros
-        preco_carbono, aumento_rendimento, diferenca_emissao, custo_adicional = parametros
-        
-        # Calcular resultado
-        reducao_tco2eq = diferenca_emissao * FATOR_N_PARA_N2O / 1000 * GWP_N2O
-        receita_carbono = reducao_tco2eq * preco_carbono * 5.5  # Convertido para R$
-        beneficio_rendimento = aumento_rendimento * 1000  # Valorização simplificada
-        
-        resultado = receita_carbono + beneficio_rendimento - custo_adicional
-        
-        return resultado
+    # Converter redução de emissões para tCO₂eq
+    reducao_tco2eq, _ = converter_emissao_para_tCO2eq(reducao_emissao, 1)
     
-    # Executar simulações
-    resultados = []
-    for params in param_values:
-        resultados.append(modelo_sobol(params))
+    # Calcular receita do carbono
+    receita_carbono = calcular_receita_carbono(
+        reducao_tco2eq,
+        preco_carbono,
+        st.session_state.taxa_cambio
+    )[0]
     
-    # Analisar resultados
-    si = analyze(problema, np.array(resultados), print_to_console=False)
+    # Calcular custos
+    custo_conv, _ = calcular_custo_fertilizante('convencional', 1)
+    custo_crf, _ = calcular_custo_fertilizante('crf', 1)
+    custo_adicional = custo_crf - custo_conv
     
-    return si, param_values, resultados
+    # Calcular benefício do rendimento
+    beneficio_rendimento = 0
+    if dados_simulacao['estudo'] == 'shakoor_et_al':
+        rendimento_base = dados_simulacao.get('rendimento_base', 10)
+        aumento = impacto_rendimento / 100
+        beneficio_rendimento = rendimento_base * aumento * dados_simulacao.get('preco_produto', 1350)
+    
+    # Resultado líquido por hectare
+    resultado_ha = receita_carbono + beneficio_rendimento - custo_adicional
+    
+    return resultado_ha
+
+# =============================================================================
+# FUNÇÕES DE ANÁLISE DE SENSIBILIDADE SOBOL (SEPARADAS COMO NO SCRIPTV2)
+# =============================================================================
+
+def definir_problema_sobol():
+    """
+    Define o problema para análise de sensibilidade Sobol
+    """
+    problema = {
+        'num_vars': 3,
+        'names': ['Preço Carbono (€)', 'Redução Emissões (kg N/ha)', 'Impacto Rendimento (%)'],
+        'bounds': [
+            [max(50, st.session_state.preco_carbono * 0.5), st.session_state.preco_carbono * 2.0],
+            [0.1, 2.0],
+            [-10.0, 10.0]
+        ]
+    }
+    return problema
+
+def executar_simulacao_sobol(parametros):
+    """
+    Executa uma simulação para análise Sobol
+    """
+    preco_carbono, reducao_emissao, impacto_rendimento = parametros
+    
+    # Converter redução de emissões para tCO₂eq
+    reducao_tco2eq, _ = converter_emissao_para_tCO2eq(reducao_emissao, 1)
+    
+    # Calcular receita do carbono
+    receita_carbono = calcular_receita_carbono(
+        reducao_tco2eq,
+        preco_carbono,
+        st.session_state.taxa_cambio
+    )[0]
+    
+    # Calcular custos
+    custo_conv, _ = calcular_custo_fertilizante('convencional', 1)
+    custo_crf, _ = calcular_custo_fertilizante('crf', 1)
+    custo_adicional = custo_crf - custo_conv
+    
+    # Calcular benefício do rendimento
+    beneficio_rendimento = 0
+    rendimento_base = dados_simulacao.get('rendimento_base', 10)
+    beneficio_rendimento = rendimento_base * (impacto_rendimento / 100) * dados_simulacao.get('preco_produto', 1350)
+    
+    # Resultado líquido por hectare
+    resultado_ha = receita_carbono + beneficio_rendimento - custo_adicional
+    
+    return resultado_ha
 
 # =============================================================================
 # INTERFACE STREAMLIT
@@ -676,6 +690,13 @@ def main():
             help="Taxa utilizada para descontar fluxos futuros"
         ) / 100
         
+        # Configuração de simulação
+        st.subheader("🎯 Configuração de Simulação")
+        n_simulations = st.slider("Número de simulações Monte Carlo", 50, 1000, 100, 50,
+                                 help="Número de iterações para análise de incerteza")
+        n_samples = st.slider("Número de amostras Sobol", 32, 256, 64, 16,
+                             help="Número de amostras para análise de sensibilidade")
+        
         # Botão de execução
         if st.button("🚀 Executar Simulação Completa", type="primary", use_container_width=True):
             st.session_state.executar_simulacao = True
@@ -731,11 +752,11 @@ def main():
             # =================================================================
             # 2. ANÁLISE DE VIABILIDADE
             # =================================================================
-            dados_viabilidade = {
+            global dados_simulacao
+            dados_simulacao = {
                 'anos': anos_simulacao,
                 'area_ha': area_total,
-                'emissao_convencional': emissao_conv_kg,
-                'emissao_crf': emissao_crf_kg,
+                'reducao_kg_N': reducao_kg_N,
                 'custo_convencional_ha': custo_conv_ha,
                 'custo_crf_ha': custo_crf_ha,
                 'receita_carbono_ha': receita_carbono_ha,
@@ -750,58 +771,15 @@ def main():
             
             # Adicionar dados específicos do estudo
             if estudo_selecionado == 'ji_et_al':
-                dados_viabilidade['reducao_rendimento'] = dados_estudo['reducao_rendimento']
+                dados_simulacao['reducao_rendimento'] = dados_estudo['reducao_rendimento']
             else:
-                dados_viabilidade['aumento_rendimento'] = dados_estudo['aumento_rendimento']
+                dados_simulacao['aumento_rendimento'] = dados_estudo['aumento_rendimento']
             
             # Executar análise de viabilidade
-            resultados_viabilidade = analise_viabilidade_economica(dados_viabilidade)
+            resultados_viabilidade = analise_viabilidade_economica(dados_simulacao)
             
             # =================================================================
-            # 3. MONTE CARLO
-            # =================================================================
-            st.subheader("🎲 Análise de Incerteza (Monte Carlo)")
-            
-            params_base_mc = {
-                'emissao_convencional': emissao_conv_kg,
-                'emissao_crf': emissao_crf_kg,
-                'preco_carbono': st.session_state.preco_carbono,
-                'taxa_cambio': st.session_state.taxa_cambio,
-                'estudo': estudo_selecionado,
-                'rendimento_base': rendimento_base,
-                'preco_produto': preco_produto
-            }
-            
-            if estudo_selecionado == 'shakoor_et_al':
-                params_base_mc['aumento_rendimento'] = dados_estudo['aumento_rendimento']
-            
-            resultados_mc = simulacao_monte_carlo(params_base_mc, n_simulacoes=1000)
-            
-            # =================================================================
-            # 4. ANÁLISE DE SENSIBILIDADE (SOBOL)
-            # =================================================================
-            st.subheader("📊 Análise de Sensibilidade (Sobol)")
-            
-            problema = {
-                'num_vars': 4,
-                'names': [
-                    'Preço Carbono (€)',
-                    'Aumento Rendimento (%)',
-                    'Diferença Emissões (kg N/ha)',
-                    'Custo Adicional (R$/ha)'
-                ],
-                'bounds': [
-                    [max(50, st.session_state.preco_carbono * 0.7), st.session_state.preco_carbono * 1.3],  # Preço carbono
-                    [0, 10],    # Aumento rendimento
-                    [0.1, 1.5], # Diferença emissões
-                    [100, 500]  # Custo adicional
-                ]
-            }
-            
-            si, param_values, resultados_sobol = analise_sensibilidade_sobol(problema, n_amostras=100)
-            
-            # =================================================================
-            # 5. APRESENTAÇÃO DOS RESULTADOS
+            # 3. APRESENTAÇÃO DOS RESULTADOS
             # =================================================================
             st.header("📈 Resultados da Simulação")
             
@@ -865,10 +843,92 @@ def main():
                     help=f"Valor das emissões evitadas em Reais"
                 )
             
-            # Métricas principais
-            st.subheader("📊 Impactos da Substituição")
+            # =================================================================
+            # 4. ANÁLISE DE SENSIBILIDADE GLOBAL (SOBOL)
+            # =================================================================
+            st.subheader("🎯 Análise de Sensibilidade Global (Sobol)")
             
-            col1, col2, col3, col4 = st.columns(4)
+            # Definir problema Sobol
+            problema_sobol = definir_problema_sobol()
+            
+            # Gerar amostras Sobol
+            param_values_sobol = sample(problema_sobol, n_samples)
+            
+            # Executar simulações em paralelo
+            with st.spinner('Executando análise de sensibilidade Sobol...'):
+                results_sobol = Parallel(n_jobs=-1)(
+                    delayed(executar_simulacao_sobol)(params) 
+                    for params in param_values_sobol
+                )
+            
+            # Analisar resultados
+            Si_sobol = analyze(problema_sobol, np.array(results_sobol), print_to_console=False)
+            
+            # Criar DataFrame com resultados
+            sensibilidade_df = pd.DataFrame({
+                'Parâmetro': problema_sobol['names'],
+                'S1': Si_sobol['S1'],
+                'ST': Si_sobol['ST']
+            }).sort_values('ST', ascending=False)
+            
+            # Gráfico de barras horizontal (igual ao scriptv2)
+            fig_sobol, ax_sobol = plt.subplots(figsize=(10, 6))
+            sns.barplot(x='ST', y='Parâmetro', data=sensibilidade_df, palette='viridis', ax=ax_sobol)
+            ax_sobol.set_title('Sensibilidade Global dos Parâmetros (Índice Sobol Total)')
+            ax_sobol.set_xlabel('Índice ST')
+            ax_sobol.set_ylabel('')
+            ax_sobol.grid(axis='x', linestyle='--', alpha=0.7)
+            ax_sobol.xaxis.set_major_formatter(FuncFormatter(br_format))
+            
+            st.pyplot(fig_sobol)
+            
+            # =================================================================
+            # 5. ANÁLISE DE INCERTEZA (MONTE CARLO)
+            # =================================================================
+            st.subheader("🎲 Análise de Incerteza (Monte Carlo)")
+            
+            # Gerar parâmetros para Monte Carlo
+            preco_carbono_vals, reducao_emissao_vals, impacto_rendimento_vals = gerar_parametros_mc(n_simulations)
+            
+            # Executar simulações Monte Carlo
+            with st.spinner(f'Executando {n_simulations} simulações Monte Carlo...'):
+                resultados_mc = []
+                for i in range(n_simulations):
+                    params_mc = [
+                        max(10, preco_carbono_vals[i]),  # Preço mínimo de €10
+                        max(0.01, reducao_emissao_vals[i]),  # Redução mínima de 0.01 kg/ha
+                        impacto_rendimento_vals[i]
+                    ]
+                    resultado = executar_simulacao_mc(params_mc)
+                    resultados_mc.append(resultado)
+            
+            resultados_array_mc = np.array(resultados_mc)
+            media_mc = np.mean(resultados_array_mc)
+            intervalo_95_mc = np.percentile(resultados_array_mc, [2.5, 97.5])
+            
+            # Gráfico de histograma (igual ao scriptv2)
+            fig_mc, ax_mc = plt.subplots(figsize=(10, 6))
+            sns.histplot(resultados_array_mc, kde=True, bins=30, color='skyblue', ax=ax_mc)
+            ax_mc.axvline(media_mc, color='red', linestyle='--', 
+                         label=f'Média: R$ {formatar_br(media_mc)}/ha')
+            ax_mc.axvline(intervalo_95_mc[0], color='green', linestyle=':', label='IC 95%')
+            ax_mc.axvline(intervalo_95_mc[1], color='green', linestyle=':')
+            ax_mc.set_title('Distribuição do Resultado Líquido (Simulação Monte Carlo)')
+            ax_mc.set_xlabel('Resultado Líquido por Hectare (R$/ha)')
+            ax_mc.set_ylabel('Frequência')
+            ax_mc.legend()
+            ax_mc.grid(alpha=0.3)
+            ax_mc.xaxis.set_major_formatter(FuncFormatter(br_format))
+            
+            st.pyplot(fig_mc)
+            
+            # =================================================================
+            # 6. ANÁLISE DE VIABILIDADE ECONÔMICA
+            # =================================================================
+            st.subheader("💰 Análise de Viabilidade Econômica")
+            
+            # Métricas principais
+            col1, col2, col3 = st.columns(3)
             
             with col1:
                 st.metric(
@@ -891,65 +951,18 @@ def main():
                     f"{((custo_crf_ha/custo_conv_ha)-1)*100:.1f}% mais caro"
                 )
             
-            with col4:
-                if estudo_selecionado == 'ji_et_al':
-                    delta_rend = f"{dados_estudo['reducao_rendimento']}%"
-                    ajuda_rend = f"Redução no rendimento do {dados_estudo['cultura']}"
-                else:
-                    delta_rend = f"+{dados_estudo['aumento_rendimento']}%"
-                    ajuda_rend = f"Aumento no rendimento do {dados_estudo['cultura']}"
-                
-                st.metric(
-                    f"Impacto no Rendimento ({dados_estudo['cultura']})",
-                    f"{formatar_br(rendimento_crf)} ton",
-                    delta_rend,
-                    help=ajuda_rend
-                )
-            
-            # =================================================================
-            # 6. ANÁLISE DE VIABILIDADE ECONÔMICA
-            # =================================================================
-            st.subheader("💰 Análise de Viabilidade Econômica")
-            
-            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-            
-            # Gráfico 1: Fluxo de Caixa
+            # Gráfico de Fluxo de Caixa
+            fig_fluxo, ax_fluxo = plt.subplots(figsize=(10, 6))
             anos_array = list(range(1, anos_simulacao + 1))
-            axes[0].bar(anos_array, resultados_viabilidade['fluxo_caixa'])
-            axes[0].axhline(y=0, color='r', linestyle='--', alpha=0.5)
-            axes[0].set_xlabel('Ano')
-            axes[0].set_ylabel('Fluxo de Caixa (R$/ha)')
-            axes[0].set_title('Fluxo de Caixa Descontado')
-            axes[0].grid(True, alpha=0.3)
-            axes[0].yaxis.set_major_formatter(FuncFormatter(br_format))
+            ax_fluxo.bar(anos_array, resultados_viabilidade['fluxo_caixa'])
+            ax_fluxo.axhline(y=0, color='r', linestyle='--', alpha=0.5)
+            ax_fluxo.set_xlabel('Ano')
+            ax_fluxo.set_ylabel('Fluxo de Caixa (R$/ha)')
+            ax_fluxo.set_title('Fluxo de Caixa Descontado por Hectare')
+            ax_fluxo.grid(True, alpha=0.3)
+            ax_fluxo.yaxis.set_major_formatter(FuncFormatter(br_format))
             
-            # Gráfico 2: Distribuição Monte Carlo (VPL)
-            axes[1].hist(resultados_mc['vpl'], bins=30, edgecolor='black', alpha=0.7)
-            axes[1].axvline(x=0, color='r', linestyle='--', linewidth=2, label='Ponto de Equilíbrio')
-            axes[1].axvline(x=np.mean(resultados_mc['vpl']), color='g', linestyle='-', 
-                           linewidth=2, label=f'Média: R$ {formatar_br(np.mean(resultados_mc["vpl"]))}')
-            axes[1].set_xlabel('VPL (R$/ha)')
-            axes[1].set_ylabel('Frequência')
-            axes[1].set_title('Distribuição do VPL (Monte Carlo)')
-            axes[1].legend()
-            axes[1].grid(True, alpha=0.3)
-            axes[1].xaxis.set_major_formatter(FuncFormatter(br_format))
-            
-            # Gráfico 3: Análise de Sensibilidade
-            sensibilidade_df = pd.DataFrame({
-                'Parâmetro': problema['names'],
-                'S1': si['S1'],
-                'ST': si['ST']
-            }).sort_values('ST', ascending=False)
-            
-            axes[2].barh(sensibilidade_df['Parâmetro'], sensibilidade_df['ST'])
-            axes[2].set_xlabel('Índice de Sensibilidade Total (ST)')
-            axes[2].set_title('Análise de Sensibilidade (Sobol)')
-            axes[2].grid(True, alpha=0.3)
-            axes[2].xaxis.set_major_formatter(FuncFormatter(br_format))
-            
-            plt.tight_layout()
-            st.pyplot(fig)
+            st.pyplot(fig_fluxo)
             
             # =================================================================
             # 7. RESUMO ESTATÍSTICO
@@ -959,23 +972,23 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                st.write("#### Monte Carlo (1000 simulações)")
+                st.write("#### Monte Carlo")
                 st.metric(
                     "Probabilidade de Viabilidade",
-                    f"{np.mean(resultados_mc['viabilidade']) * 100:.1f}%",
-                    help="Percentual de simulações onde VPL > 0"
+                    f"{(np.sum(resultados_array_mc > 0) / n_simulations) * 100:.1f}%",
+                    help="Percentual de simulações onde resultado > 0"
                 )
                 
                 st.metric(
-                    "VPL Médio",
-                    f"R$ {formatar_br(np.mean(resultados_mc['vpl']))}/ha",
-                    help="Valor Presente Líquido médio por hectare"
+                    "Resultado Médio",
+                    f"R$ {formatar_br(media_mc)}/ha",
+                    help="Resultado líquido médio por hectare"
                 )
                 
                 st.metric(
                     "Intervalo de Confiança 95%",
-                    f"[R$ {formatar_br(np.percentile(resultados_mc['vpl'], 2.5))}, R$ {formatar_br(np.percentile(resultados_mc['vpl'], 97.5))}]",
-                    help="Intervalo de confiança do VPL"
+                    f"[R$ {formatar_br(intervalo_95_mc[0])}, R$ {formatar_br(intervalo_95_mc[1])}]",
+                    help="Intervalo de confiança do resultado"
                 )
             
             with col2:
@@ -1008,60 +1021,14 @@ def main():
                             f"€ {formatar_br(preco_minimo_eur)}/tCO₂eq",
                             f"R$ {formatar_br(preco_minimo_ha)}/tCO₂eq"
                         )
-                    else:
-                        st.metric(
-                            "Preço Mínimo do Carbono",
-                            "N/A",
-                            "Redução de emissões insuficiente"
-                        )
             
             # =================================================================
-            # 8. ANÁLISE POR CENÁRIO
-            # =================================================================
-            st.subheader("🌍 Análise por Cenário")
-            
-            # Criar cenários baseados no preço atual
-            preco_base = st.session_state.preco_carbono
-            cenarios = [
-                {'nome': 'Cenário Atual', 'preco_carbono': preco_base, 'taxa_cambio': st.session_state.taxa_cambio},
-                {'nome': 'Mercado em Expansão', 'preco_carbono': preco_base * 1.4, 'taxa_cambio': st.session_state.taxa_cambio},
-                {'nome': 'Alta do Carbono', 'preco_carbono': preco_base * 1.8, 'taxa_cambio': st.session_state.taxa_cambio},
-                {'nome': 'Mercado Regulado', 'preco_carbono': preco_base * 2.3, 'taxa_cambio': st.session_state.taxa_cambio}
-            ]
-            
-            resultados_cenarios = []
-            for cenario in cenarios:
-                receita_cenario, _ = calcular_receita_carbono(
-                    reducao_tco2eq_total,
-                    cenario['preco_carbono'],
-                    cenario['taxa_cambio']
-                )
-                
-                vpl_cenario = sum([
-                    (receita_cenario/area_total - (custo_crf_ha - custo_conv_ha) + 
-                     max(0, (rendimento_crf_ha - rendimento_conv_ha) * preco_produto)) /
-                    ((1 + taxa_desconto) ** ano)
-                    for ano in range(1, anos_simulacao + 1)
-                ]) * area_total
-                
-                resultados_cenarios.append({
-                    'Cenário': cenario['nome'],
-                    'Preço Carbono (€)': formatar_br(cenario['preco_carbono']),
-                    'VPL Total (R$)': formatar_br(vpl_cenario),
-                    'VPL/ha (R$)': formatar_br(vpl_cenario / area_total),
-                    'Viável': 'SIM' if vpl_cenario > 0 else 'NÃO'
-                })
-            
-            df_cenarios = pd.DataFrame(resultados_cenarios)
-            st.dataframe(df_cenarios)
-            
-            # =================================================================
-            # 9. CONCLUSÕES E RECOMENDAÇÕES
+            # 8. CONCLUSÕES E RECOMENDAÇÕES
             # =================================================================
             st.subheader("🎯 Conclusões e Recomendações")
             
             vpl_ha = resultados_viabilidade['vpl']
-            probabilidade_viabilidade = np.mean(resultados_mc['viabilidade']) * 100
+            probabilidade_viabilidade = (np.sum(resultados_array_mc > 0) / n_simulations) * 100
             
             if vpl_ha > 0:
                 st.success(f"""
@@ -1078,17 +1045,6 @@ def main():
                 4. Aproveitar ganhos de produtividade (se aplicável)
                 """)
             else:
-                # Calcular preço mínimo se não estiver disponível
-                if 'preco_minimo_eur' not in locals():
-                    custo_adicional_ha = custo_crf_ha - custo_conv_ha
-                    beneficio_rendimento_ha = max(0, (rendimento_crf_ha - rendimento_conv_ha) * preco_produto)
-                    reducao_ha = reducao_tco2eq_total / area_total
-                    if reducao_ha > 0:
-                        preco_minimo_ha = (custo_adicional_ha - beneficio_rendimento_ha) / reducao_ha
-                        preco_minimo_eur = preco_minimo_ha / st.session_state.taxa_cambio
-                    else:
-                        preco_minimo_eur = 0
-                
                 st.warning(f"""
                 **⚠️ PROJETO NÃO VIÁVEL NO CENÁRIO ATUAL**
                 
@@ -1099,9 +1055,8 @@ def main():
                 **Estratégias para viabilizar {dados_estudo['cultura']}:**
                 1. Buscar subsídios governamentais para transição
                 2. Negociar desconto com fornecedores de CRF
-                3. Esperar aumento no preço do carbono (viável a partir de € {formatar_br(preco_minimo_eur)}/tCO₂eq)
+                3. Esperar aumento no preço do carbono
                 4. Focar no aumento de produtividade como principal benefício
-                5. Considerar combinação CRF + ureia para reduzir custos
                 """)
     
     else:
