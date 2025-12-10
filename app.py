@@ -721,9 +721,9 @@ def main():
             if st.button("🚀 Executar Simulação Completa", type="primary", use_container_width=True):
                 st.session_state.executar_simulacao = True
         
-        # Inicializar variáveis para evitar UnboundLocalError
-        executar_simulacao = st.session_state.get('executar_simulacao', False)
-        sensibilidade_significativa = pd.DataFrame()  # Inicializar variável
+    # Inicializar variáveis para evitar UnboundLocalError
+    executar_simulacao = st.session_state.get('executar_simulacao', False)
+    sensibilidade_significativa = pd.DataFrame()  # Inicializar variável
         
         if executar_simulacao:
     sensibilidade_significativa = pd.DataFrame()
