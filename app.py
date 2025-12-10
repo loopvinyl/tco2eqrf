@@ -720,10 +720,11 @@ def main():
             if st.button("🚀 Executar Simulação Completa", type="primary", use_container_width=True):
                 st.session_state.executar_simulacao = True
         
-        if 'executar_simulacao' not in st.session_state:
-            st.session_state.executar_simulacao = False
+        # Inicializar variáveis para evitar UnboundLocalError
+        executar_simulacao = st.session_state.get('executar_simulacao', False)
+        sensibilidade_significativa = pd.DataFrame()  # Inicializar variável
         
-        if st.session_state.executar_simulacao:
+        if executar_simulacao:
             with st.spinner('Executando simulação...'):
                 # Inicializar variáveis com valores padrão
                 emissao_conv_kg = 0
@@ -738,6 +739,8 @@ def main():
                 rendimento_crf_ha = 0
                 receita_carbono_real = 0
                 receita_carbono_ha = 0
+                reducao_tco2eq_total = 0
+                reducao_tco2eq_ha = 0
                 
                 dados_estudo = DADOS_ARTIGOS.get(estudo_selecionado, DADOS_ARTIGOS['shakoor_et_al'])
                 
@@ -883,6 +886,7 @@ def main():
                     
                 except Exception as e:
                     st.warning(f"Não foi possível realizar a análise de sensibilidade: {str(e)}")
+                    sensibilidade_significativa = pd.DataFrame()  # Garantir que está definida
                 
                 # Continuação com os resultados...
                 st.header("📈 Resultados da Simulação")
@@ -924,8 +928,6 @@ def main():
                     )
                 
                 # O restante do código de visualização...
-                # Para manter o código mais curto, vou continuar com as partes principais
-                
                 st.subheader("💰 Análise de Viabilidade Econômica")
                 
                 fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -953,7 +955,7 @@ def main():
                 axes[1].grid(True, alpha=0.3)
                 axes[1].xaxis.set_major_formatter(FuncFormatter(br_format))
                 
-                if 'sensibilidade_significativa' in locals() and len(sensibilidade_significativa) > 0:
+                if not sensibilidade_significativa.empty and len(sensibilidade_significativa) > 0:
                     top_params = sensibilidade_significativa.sort_values('ST', ascending=False).head(4)
                     axes[2].barh(top_params['Parâmetro'], top_params['ST'])
                     axes[2].set_xlabel('Índice de Sensibilidade Total (ST)')
