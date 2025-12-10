@@ -602,7 +602,6 @@ def analise_sensibilidade_sobol_completa(params_base, n_amostras=100):
 # =============================================================================
 
 def main():
-    sensibilidade_significativa = pd.DataFrame()
     try:
         st.title("🌾 Simulador de Fertilizantes Nitrogenados")
         st.markdown("""
@@ -721,14 +720,12 @@ def main():
             if st.button("🚀 Executar Simulação Completa", type="primary", use_container_width=True):
                 st.session_state.executar_simulacao = True
         
-    # Inicializar variáveis para evitar UnboundLocalError
-    executar_simulacao = st.session_state.get('executar_simulacao', False)
-    sensibilidade_significativa = pd.DataFrame()  # Inicializar variável
+        # Inicializar variáveis para evitar UnboundLocalError
+        executar_simulacao = st.session_state.get('executar_simulacao', False)
+        sensibilidade_significativa = pd.DataFrame()  # Inicializar variável
         
-    if executar_simulacao:
-    sensibilidade_significativa = pd.DataFrame()
-    with st.spinner('Executando simulação...'):
-        
+        if executar_simulacao:
+            with st.spinner('Executando simulação...'):
                 # Inicializar variáveis com valores padrão
                 emissao_conv_kg = 0
                 emissao_crf_kg = 0
@@ -1122,6 +1119,7 @@ def main():
             st.dataframe(df_comparacao)
     
     except Exception as error:
+        # Exibir a mensagem de erro diretamente no bloco except
         st.error(f"Ocorreu um erro no aplicativo: {str(error)}")
         st.info("""
         **Solução de problemas:**
