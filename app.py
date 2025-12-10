@@ -733,6 +733,7 @@ def main():
                 emissao_crf_kg = dados_estudo['emissao_crf']
             
             # Calcular redução de emissões
+        
             reducao_kg_N = emissao_conv_kg - emissao_crf_kg
             reducao_tco2eq_total, reducao_tco2eq_ha = converter_emissao_para_tCO2eq(reducao_kg_N, area_total)
             
@@ -843,7 +844,7 @@ def main():
             
             with col1:
                 st.metric(
-                    "Redução de Emissões",
+                    "Emissões Evitadas",
                     f"{formatar_numero_brasileiro(reducao_tco2eq_total, 0)} tCO₂eq",
                     delta=f"{formatar_numero_brasileiro(dados_estudo['reducao_percentual'], 1)}%"
                 )
