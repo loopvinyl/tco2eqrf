@@ -314,10 +314,6 @@ DOSAGEM_N = 240     # kg N ha⁻¹ (dosagem típica)
 FATOR_N_PARA_N2O = 44/28  # 1,571 (conversão de N para N2O)
 GWP_N2O = 273  # Potencial de aquecimento global do N2O (100 anos)
 
-# Preços do carbono (referência)
-PRECO_CARBONO_EUR = 85.50  # €/tCO₂eq (valor de referência)
-PRECO_CARBONO_REAL = 85.50 * 5.5  # Conversão para R$ (€1 = R$5,50)
-
 # =============================================================================
 # FUNÇÕES DE CÁLCULO
 # =============================================================================
@@ -615,24 +611,8 @@ def main():
             step=50
         )
         
-        # Configurações avançadas
+        # Configurações avançadas (agora sem os campos duplicados de carbono e câmbio)
         with st.expander("🔧 Parâmetros Avançados"):
-            preco_carbono_eur = st.number_input(
-                "Preço do Carbono (€/tCO₂eq)",
-                min_value=10.0,
-                max_value=200.0,
-                value=85.5,
-                step=5.0
-            )
-            
-            taxa_cambio = st.number_input(
-                "Taxa Câmbio (€ → R$)",
-                min_value=4.0,
-                max_value=7.0,
-                value=5.5,
-                step=0.1
-            )
-            
             taxa_desconto = st.slider(
                 "Taxa de Desconto (%)",
                 min_value=1.0,
@@ -682,11 +662,11 @@ def main():
                 'crf', rendimento_base, area_total, estudo_selecionado
             )
             
-            # Calcular receita do carbono
+            # Calcular receita do carbono usando as cotações automáticas
             receita_carbono_real, receita_carbono_eur = calcular_receita_carbono(
                 reducao_tco2eq_total,
-                preco_carbono_eur,
-                taxa_cambio
+                st.session_state.preco_carbono,  # Usando a cotação automática
+                st.session_state.taxa_cambio    # Usando a taxa de câmbio automática
             )
             
             # Calcular receita por hectare
@@ -706,8 +686,8 @@ def main():
                 'custo_convencional_ha': custo_conv_ha,
                 'custo_crf_ha': custo_crf_ha,
                 'receita_carbono_ha': receita_carbono_ha,
-                'preco_carbono': preco_carbono_eur,
-                'taxa_cambio': taxa_cambio,
+                'preco_carbono': st.session_state.preco_carbono,  # Usando a cotação automática
+                'taxa_cambio': st.session_state.taxa_cambio,      # Usando a taxa de câmbio automática
                 'taxa_desconto': taxa_desconto,
                 'rendimento_base': rendimento_base,
                 'preco_produto': preco_produto,
@@ -732,8 +712,8 @@ def main():
             params_base_mc = {
                 'emissao_convencional': emissao_conv_kg,
                 'emissao_crf': emissao_crf_kg,
-                'preco_carbono': preco_carbono_eur,
-                'taxa_cambio': taxa_cambio,
+                'preco_carbono': st.session_state.preco_carbono,  # Usando a cotação automática
+                'taxa_cambio': st.session_state.taxa_cambio,      # Usando a taxa de câmbio automática
                 'estudo': estudo_selecionado,
                 'rendimento_base': rendimento_base,
                 'preco_produto': preco_produto
@@ -786,7 +766,8 @@ def main():
                 st.metric(
                     "Receita Carbono Potencial",
                     f"R$ {receita_carbono_real:,.0f}",
-                    f"€ {receita_carbono_eur:,.0f}"
+                    f"€ {receita_carbono_eur:,.0f}",
+                    help=f"Preço do carbono: €{st.session_state.preco_carbono:.2f}/tCO₂eq"
                 )
             
             with col3:
@@ -900,12 +881,13 @@ def main():
                     reducao_ha = reducao_tco2eq_total / area_total
                     if reducao_ha > 0:
                         preco_minimo_ha = (custo_adicional_ha - beneficio_rendimento_ha) / reducao_ha
-                        preco_minimo_eur = preco_minimo_ha / taxa_cambio
+                        preco_minimo_eur = preco_minimo_ha / st.session_state.taxa_cambio
                         
                         st.metric(
                             "Preço Mínimo do Carbono para Viabilidade",
                             f"€ {preco_minimo_eur:,.0f}/tCO₂eq",
-                            f"R$ {preco_minimo_ha:,.0f}/tCO₂eq"
+                            f"R$ {preco_minimo_ha:,.0f}/tCO₂eq",
+                            help="Preço necessário para tornar o projeto viável"
                         )
                     else:
                         st.metric(
@@ -919,12 +901,15 @@ def main():
             # =================================================================
             st.subheader("🌍 Análise por Cenário")
             
-            # Criar cenários
+            # Criar cenários usando o preço atual do carbono como base
+            preco_carbono_atual = st.session_state.preco_carbono
+            taxa_cambio_atual = st.session_state.taxa_cambio
+            
             cenarios = [
-                {'nome': 'Cenário Atual', 'preco_carbono': 85.5, 'taxa_cambio': 5.5},
-                {'nome': 'Mercado em Expansão', 'preco_carbono': 120, 'taxa_cambio': 5.5},
-                {'nome': 'Alta do Carbono', 'preco_carbono': 150, 'taxa_cambio': 5.5},
-                {'nome': 'Mercado Regulado', 'preco_carbono': 200, 'taxa_cambio': 5.5}
+                {'nome': 'Cenário Atual', 'preco_carbono': preco_carbono_atual, 'taxa_cambio': taxa_cambio_atual},
+                {'nome': 'Mercado em Expansão', 'preco_carbono': preco_carbono_atual * 1.4, 'taxa_cambio': taxa_cambio_atual},
+                {'nome': 'Alta do Carbono', 'preco_carbono': preco_carbono_atual * 1.75, 'taxa_cambio': taxa_cambio_atual},
+                {'nome': 'Mercado Regulado', 'preco_carbono': preco_carbono_atual * 2.3, 'taxa_cambio': taxa_cambio_atual}
             ]
             
             resultados_cenarios = []
@@ -969,6 +954,7 @@ def main():
                 - **VPL positivo:** R$ {vpl_ha * area_total:,.0f} (R$ {vpl_ha:,.0f}/ha)
                 - **Probabilidade de sucesso:** {probabilidade_viabilidade:.1f}%
                 - **Payback:** {resultados_viabilidade['payback']} anos
+                - **Preço atual do carbono:** €{st.session_state.preco_carbono:.2f}/tCO₂eq
                 
                 **Recomendações:**
                 1. Implementar projeto piloto em área reduzida
@@ -977,11 +963,22 @@ def main():
                 4. Aproveitar ganhos de produtividade (se aplicável)
                 """)
             else:
+                # Calcular preço mínimo se ainda não calculado
+                if resultados_viabilidade['vpl'] < 0:
+                    custo_adicional_ha = custo_crf_ha - custo_conv_ha
+                    beneficio_rendimento_ha = max(0, (rendimento_crf_ha - rendimento_conv_ha) * preco_produto)
+                    reducao_ha = reducao_tco2eq_total / area_total
+                    
+                    if reducao_ha > 0:
+                        preco_minimo_ha = (custo_adicional_ha - beneficio_rendimento_ha) / reducao_ha
+                        preco_minimo_eur = preco_minimo_ha / st.session_state.taxa_cambio
+                
                 st.warning(f"""
                 **⚠️ PROJETO NÃO VIÁVEL NO CENÁRIO ATUAL**
                 
                 - **VPL negativo:** R$ {vpl_ha * area_total:,.0f} (R$ {vpl_ha:,.0f}/ha)
                 - **Probabilidade de viabilidade:** {probabilidade_viabilidade:.1f}%
+                - **Preço atual do carbono:** €{st.session_state.preco_carbono:.2f}/tCO₂eq
                 - **Fator limitante:** Custo adicional do CRF
                 
                 **Estratégias para viabilizar:**
@@ -995,18 +992,20 @@ def main():
             # Adicionar insights específicos por estudo
             with st.expander("📚 Insights Específicos por Estudo"):
                 if estudo_selecionado == 'ji_et_al':
-                    st.info("""
+                    st.info(f"""
                     **Ji et al. (2013) - Sistema Arroz:**
                     - CRF reduz emissões em 14.5%, mas reduz rendimento em 5%
                     - Timing da aeração (MSA) é crítico: MSA em D30 otimiza redução
                     - Necessário compensar perda de rendimento com valor agregado ou carbono
+                    - **Preço do carbono atual:** €{st.session_state.preco_carbono:.2f}/tCO₂eq
                     """)
                 else:
-                    st.info("""
+                    st.info(f"""
                     **Shakoor et al. (2018) - Sistema Arroz-Trigo:**
                     - CRF reduz emissões em 26.5% e aumenta rendimento em 3%
                     - Sistema de rotação otimiza benefícios
                     - Viabilidade mais provável devido ao duplo benefício
+                    - **Preço do carbono atual:** €{st.session_state.preco_carbono:.2f}/tCO₂eq
                     """)
             
             # =================================================================
@@ -1022,8 +1021,8 @@ def main():
                     'Anos Simulação': anos_simulacao,
                     'Rendimento Base (ton/ha)': rendimento_base,
                     'Preço Produto (R$/ton)': preco_produto,
-                    'Preço Carbono (€/tCO₂eq)': preco_carbono_eur,
-                    'Taxa Câmbio (€→R$)': taxa_cambio,
+                    'Preço Carbono (€/tCO₂eq)': st.session_state.preco_carbono,
+                    'Taxa Câmbio (€→R$)': st.session_state.taxa_cambio,
                     'Taxa Desconto (%)': taxa_desconto * 100
                 },
                 'Resultados Principais': {
@@ -1064,10 +1063,11 @@ def main():
         st.info("""
         ### 💡 Como usar este simulador:
         
-        1. **Selecione o estudo base** na barra lateral (Ji et al. 2013 ou Shakoor et al. 2018)
-        2. **Configure os parâmetros** da sua operação (área, rendimento, preços)
-        3. **Clique em "Executar Simulação Completa"**
-        4. **Analise os resultados** de viabilidade econômica e ambiental
+        1. **Acompanhe as cotações do carbono e câmbio** na seção superior da barra lateral
+        2. **Selecione o estudo base** na seção de configuração (Ji et al. 2013 ou Shakoor et al. 2018)
+        3. **Configure os parâmetros** da sua operação (área, rendimento, preços)
+        4. **Clique em "Executar Simulação Completa"**
+        5. **Analise os resultados** de viabilidade econômica e ambiental
         
         ### 📊 O que será analisado:
         - Redução de emissões de N₂O
@@ -1098,3 +1098,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
