@@ -314,7 +314,8 @@ DADOS_ARTIGOS = {
         'reducao_rendimento': -5.0,  # % redução no rendimento
         'cultura': 'Arroz',
         'sistema': 'Monocultura',
-        'rendimento_base': 7.0,  # ton/ha (valor típico para arroz)
+        'rendimento_arroz_base': 7.0,  # ton/ha (valor típico para arroz)
+        'rendimento_trigo_base': None,  # Não aplicável
         'preco_arroz': 1500,  # R$/ton (preço médio do arroz)
         'preco_trigo': None,  # Não aplicável
         'unidade_rendimento': 'ton/ha (arroz)',
@@ -330,13 +331,12 @@ DADOS_ARTIGOS = {
         'aumento_rendimento': 3.0,  # % aumento no rendimento
         'cultura': 'Arroz-Trigo',
         'sistema': 'Rotação',
-        'rendimento_base': 10.0,  # ton/ha (soma arroz + trigo)
+        'rendimento_arroz_base': 5.0,  # ton/ha arroz
+        'rendimento_trigo_base': 5.0,  # ton/ha trigo
         'preco_arroz': 1500,  # R$/ton (preço médio do arroz)
         'preco_trigo': 1200,  # R$/ton (preço médio do trigo)
-        'proporcao_arroz': 0.5,  # 50% arroz, 50% trigo
-        'proporcao_trigo': 0.5,
         'unidade_rendimento': 'ton/ha (arroz + trigo)',
-        'descricao_produto': 'Arroz (50%) + Trigo (50%)'
+        'descricao_produto': 'Arroz + Trigo'
     }
 }
 
@@ -388,19 +388,27 @@ def calcular_custo_fertilizante(tipo, area_ha):
     
     return custo_total, custo_ha
 
-def calcular_preco_medio_ponderado(estudo, preco_arroz, preco_trigo=None):
+def calcular_rendimento_total_estudo_shakoor(rendimento_arroz, rendimento_trigo, area_ha):
     """
-    Calcula preço médio ponderado baseado no estudo
+    Calcula o rendimento total para o estudo Shakoor et al.
     """
-    if estudo == 'ji_et_al':
-        return preco_arroz
-    else:  # shakoor_et_al
-        # Para Shakoor et al., usa proporção 50% arroz, 50% trigo
-        if preco_trigo is None:
-            preco_trigo = DADOS_ARTIGOS['shakoor_et_al']['preco_trigo']
-        return (preco_arroz * 0.5) + (preco_trigo * 0.5)
+    rendimento_total_ha = rendimento_arroz + rendimento_trigo
+    rendimento_total = rendimento_total_ha * area_ha
+    
+    return rendimento_total, rendimento_total_ha
 
-def calcular_rendimento(tipo, rendimento_base, area_ha, estudo, preco_arroz, preco_trigo=None):
+def calcular_valor_rendimento_estudo_shakoor(rendimento_arroz, rendimento_trigo, preco_arroz, preco_trigo, area_ha):
+    """
+    Calcula o valor do rendimento para o estudo Shakoor et al.
+    """
+    valor_arroz = rendimento_arroz * preco_arroz * area_ha
+    valor_trigo = rendimento_trigo * preco_trigo * area_ha
+    valor_total = valor_arroz + valor_trigo
+    valor_total_ha = valor_total / area_ha if area_ha > 0 else 0
+    
+    return valor_total, valor_total_ha, valor_arroz, valor_trigo
+
+def calcular_rendimento(tipo, rendimento_base, area_ha, estudo, preco_arroz, preco_trigo=None, rendimento_arroz=None, rendimento_trigo=None):
     """
     Calcula rendimento ajustado baseado no tipo de fertilizante
     """
@@ -414,21 +422,30 @@ def calcular_rendimento(tipo, rendimento_base, area_ha, estudo, preco_arroz, pre
         else:  # shakoor_et_al
             fator_ajuste = 1 + (dados['aumento_rendimento'] / 100)  # +3% no Shakoor et al.
     
-    rendimento_ajustado_ha = rendimento_base * fator_ajuste
-    rendimento_total = rendimento_ajustado_ha * area_ha
-    
-    # Calcular valor financeiro do rendimento
     if estudo == 'ji_et_al':
+        # Para Ji et al., usa rendimento_base como rendimento de arroz
+        rendimento_arroz_ajustado = rendimento_base * fator_ajuste
+        rendimento_total = rendimento_arroz_ajustado * area_ha
         valor_rendimento = rendimento_total * preco_arroz
-    else:  # shakoor_et_al
-        if preco_trigo is None:
-            preco_trigo = DADOS_ARTIGOS['shakoor_et_al']['preco_trigo']
-        # Assumindo 50% arroz, 50% trigo
-        valor_arroz = (rendimento_total * 0.5) * preco_arroz
-        valor_trigo = (rendimento_total * 0.5) * preco_trigo
-        valor_rendimento = valor_arroz + valor_trigo
+        rendimento_total_ha = rendimento_arroz_ajustado
+        
+        return rendimento_total, rendimento_total_ha, valor_rendimento
     
-    return rendimento_total, rendimento_ajustado_ha, valor_rendimento
+    else:  # shakoor_et_al
+        # Para Shakoor et al., ajusta ambos rendimentos
+        rendimento_arroz_ajustado = rendimento_arroz * fator_ajuste
+        rendimento_trigo_ajustado = rendimento_trigo * fator_ajuste
+        
+        # Calcula rendimento total
+        rendimento_total_ha = rendimento_arroz_ajustado + rendimento_trigo_ajustado
+        rendimento_total = rendimento_total_ha * area_ha
+        
+        # Calcula valor total
+        valor_arroz = rendimento_arroz_ajustado * preco_arroz * area_ha
+        valor_trigo = rendimento_trigo_ajustado * preco_trigo * area_ha
+        valor_rendimento = valor_arroz + valor_trigo
+        
+        return rendimento_total, rendimento_total_ha, valor_rendimento
 
 def calcular_receita_carbono(reducao_tco2eq, preco_carbono, taxa_cambio=1):
     """
@@ -560,14 +577,22 @@ def executar_simulacao_mc(parametros):
     # Calcular benefício do rendimento
     beneficio_rendimento = 0
     if dados_simulacao['estudo'] == 'shakoor_et_al':
-        rendimento_base = dados_simulacao.get('rendimento_base', 10)
+        rendimento_arroz_base = dados_simulacao.get('rendimento_arroz_base', 5)
+        rendimento_trigo_base = dados_simulacao.get('rendimento_trigo_base', 5)
         aumento = impacto_rendimento / 100
-        preco_medio = calcular_preco_medio_ponderado(
-            dados_simulacao['estudo'],
-            dados_simulacao['preco_arroz'],
-            dados_simulacao.get('preco_trigo')
+        
+        rendimento_arroz_ajustado = rendimento_arroz_base * (1 + aumento)
+        rendimento_trigo_ajustado = rendimento_trigo_base * (1 + aumento)
+        
+        preco_arroz = dados_simulacao.get('preco_arroz', 1500)
+        preco_trigo = dados_simulacao.get('preco_trigo', 1200)
+        
+        beneficio_rendimento = (
+            (rendimento_arroz_ajustado * preco_arroz) + 
+            (rendimento_trigo_ajustado * preco_trigo) -
+            (rendimento_arroz_base * preco_arroz) - 
+            (rendimento_trigo_base * preco_trigo)
         )
-        beneficio_rendimento = rendimento_base * aumento * preco_medio
     
     # Resultado líquido por hectare
     resultado_ha = receita_carbono + beneficio_rendimento - custo_adicional
@@ -616,13 +641,27 @@ def executar_simulacao_sobol(parametros):
     
     # Calcular benefício do rendimento
     beneficio_rendimento = 0
-    rendimento_base = dados_simulacao.get('rendimento_base', 10)
-    preco_medio = calcular_preco_medio_ponderado(
-        dados_simulacao['estudo'],
-        dados_simulacao['preco_arroz'],
-        dados_simulacao.get('preco_trigo')
-    )
-    beneficio_rendimento = rendimento_base * (impacto_rendimento / 100) * preco_medio
+    if dados_simulacao['estudo'] == 'shakoor_et_al':
+        rendimento_arroz_base = dados_simulacao.get('rendimento_arroz_base', 5)
+        rendimento_trigo_base = dados_simulacao.get('rendimento_trigo_base', 5)
+        preco_arroz = dados_simulacao.get('preco_arroz', 1500)
+        preco_trigo = dados_simulacao.get('preco_trigo', 1200)
+        
+        # Calcula o benefício do aumento de rendimento
+        rendimento_total_base = rendimento_arroz_base + rendimento_trigo_base
+        valor_total_base = (rendimento_arroz_base * preco_arroz) + (rendimento_trigo_base * preco_trigo)
+        
+        rendimento_total_ajustado = rendimento_total_base * (1 + impacto_rendimento/100)
+        
+        # Distribui proporcionalmente o aumento
+        proporcao_arroz = rendimento_arroz_base / rendimento_total_base if rendimento_total_base > 0 else 0.5
+        proporcao_trigo = rendimento_trigo_base / rendimento_total_base if rendimento_total_base > 0 else 0.5
+        
+        rendimento_arroz_ajustado = rendimento_arroz_base + (rendimento_total_ajustado - rendimento_total_base) * proporcao_arroz
+        rendimento_trigo_ajustado = rendimento_trigo_base + (rendimento_total_ajustado - rendimento_total_base) * proporcao_trigo
+        
+        valor_total_ajustado = (rendimento_arroz_ajustado * preco_arroz) + (rendimento_trigo_ajustado * preco_trigo)
+        beneficio_rendimento = valor_total_ajustado - valor_total_base
     
     # Resultado líquido por hectare
     resultado_ha = receita_carbono + beneficio_rendimento - custo_adicional
@@ -681,32 +720,59 @@ def main():
         # Parâmetros gerais
         st.subheader("📍 Parâmetros da Cultura")
         
-        # Rendimento base (ajustado conforme estudo)
-        rendimento_base = st.slider(
-            f"Rendimento Base ({dados_estudo['unidade_rendimento']})",
-            min_value=float(max(1.0, dados_estudo['rendimento_base'] * 0.5)),
-            max_value=float(dados_estudo['rendimento_base'] * 2.0),
-            value=float(dados_estudo['rendimento_base']),
-            step=0.5,
-            help=f"Rendimento médio com fertilizante convencional - {dados_estudo['cultura']}"
-        )
-        
-        # Preços dos produtos (ajustado conforme estudo)
         if estudo_selecionado == 'ji_et_al':
-            # Apenas preço do arroz
+            # Apenas rendimento do arroz para Ji et al.
+            rendimento_arroz = st.slider(
+                "Rendimento Base (ton/ha arroz)",
+                min_value=float(max(1.0, dados_estudo['rendimento_arroz_base'] * 0.5)),
+                max_value=float(dados_estudo['rendimento_arroz_base'] * 2.0),
+                value=float(dados_estudo['rendimento_arroz_base']),
+                step=0.5,
+                help="Rendimento médio do arroz com fertilizante convencional"
+            )
+            rendimento_trigo = None
+            rendimento_base = rendimento_arroz
+            
+            # Preço do arroz
             preco_arroz = st.slider(
                 f"Preço do Arroz (R$/ton)",
                 min_value=int(dados_estudo['preco_arroz'] * 0.5),
                 max_value=int(dados_estudo['preco_arroz'] * 2.0),
                 value=int(dados_estudo['preco_arroz']),
                 step=50,
-                help=f"Preço de mercado do arroz - {dados_estudo['cultura']}"
+                help="Preço de mercado do arroz"
             )
             preco_trigo = None
             preco_produto = preco_arroz
             
         else:  # shakoor_et_al
-            # Preço do arroz e trigo
+            # Rendimentos separados para arroz e trigo
+            col1, col2 = st.columns(2)
+            with col1:
+                rendimento_arroz = st.slider(
+                    "Rendimento Arroz (ton/ha)",
+                    min_value=float(max(1.0, dados_estudo['rendimento_arroz_base'] * 0.5)),
+                    max_value=float(dados_estudo['rendimento_arroz_base'] * 2.0),
+                    value=float(dados_estudo['rendimento_arroz_base']),
+                    step=0.5,
+                    help="Rendimento médio do arroz com fertilizante convencional"
+                )
+            with col2:
+                rendimento_trigo = st.slider(
+                    "Rendimento Trigo (ton/ha)",
+                    min_value=float(max(1.0, dados_estudo['rendimento_trigo_base'] * 0.5)),
+                    max_value=float(dados_estudo['rendimento_trigo_base'] * 2.0),
+                    value=float(dados_estudo['rendimento_trigo_base']),
+                    step=0.5,
+                    help="Rendimento médio do trigo com fertilizante convencional"
+                )
+            
+            # Calcular rendimento total base
+            rendimento_base, rendimento_total_ha = calcular_rendimento_total_estudo_shakoor(
+                rendimento_arroz, rendimento_trigo, 1  # 1 hectare para cálculo por ha
+            )
+            
+            # Preços separados para arroz e trigo
             col1, col2 = st.columns(2)
             with col1:
                 preco_arroz = st.slider(
@@ -727,11 +793,22 @@ def main():
                     help="Preço de mercado do trigo"
                 )
             
-            # Calcular preço médio ponderado
-            preco_produto = calcular_preco_medio_ponderado(estudo_selecionado, preco_arroz, preco_trigo)
-            
-            # Mostrar preço médio
-            st.info(f"**Preço médio ponderado:** R$ {formatar_br(preco_produto)}/ton (50% arroz, 50% trigo)")
+            # Calcular preço médio ponderado para exibição
+            if rendimento_total_ha > 0:
+                preco_medio = (
+                    (rendimento_arroz * preco_arroz) + 
+                    (rendimento_trigo * preco_trigo)
+                ) / rendimento_total_ha
+                preco_produto = preco_medio
+                
+                # Mostrar preço médio ponderado
+                st.info(f"""
+                **Resumo dos Rendimentos:**
+                - **Rendimento total:** {formatar_br(rendimento_total_ha)} ton/ha
+                - **Arroz:** {formatar_br(rendimento_arroz)} ton/ha
+                - **Trigo:** {formatar_br(rendimento_trigo)} ton/ha
+                - **Preço médio ponderado:** R$ {formatar_br(preco_medio)}/ton
+                """)
         
         st.subheader("🏢 Parâmetros da Operação")
         
@@ -801,12 +878,24 @@ def main():
             custo_crf, custo_crf_ha = calcular_custo_fertilizante('crf', area_total)
             
             # Calcular rendimentos
-            rendimento_conv, rendimento_conv_ha, valor_rendimento_conv = calcular_rendimento(
-                'convencional', rendimento_base, area_total, estudo_selecionado, preco_arroz, preco_trigo
-            )
-            rendimento_crf, rendimento_crf_ha, valor_rendimento_crf = calcular_rendimento(
-                'crf', rendimento_base, area_total, estudo_selecionado, preco_arroz, preco_trigo
-            )
+            if estudo_selecionado == 'ji_et_al':
+                rendimento_conv, rendimento_conv_ha, valor_rendimento_conv = calcular_rendimento(
+                    'convencional', rendimento_base, area_total, estudo_selecionado, 
+                    preco_arroz, preco_trigo
+                )
+                rendimento_crf, rendimento_crf_ha, valor_rendimento_crf = calcular_rendimento(
+                    'crf', rendimento_base, area_total, estudo_selecionado, 
+                    preco_arroz, preco_trigo
+                )
+            else:  # shakoor_et_al
+                rendimento_conv, rendimento_conv_ha, valor_rendimento_conv = calcular_rendimento(
+                    'convencional', rendimento_base, area_total, estudo_selecionado, 
+                    preco_arroz, preco_trigo, rendimento_arroz, rendimento_trigo
+                )
+                rendimento_crf, rendimento_crf_ha, valor_rendimento_crf = calcular_rendimento(
+                    'crf', rendimento_base, area_total, estudo_selecionado, 
+                    preco_arroz, preco_trigo, rendimento_arroz, rendimento_trigo
+                )
             
             # Calcular receita do carbono
             receita_carbono_real, receita_carbono_eur = calcular_receita_carbono(
@@ -839,6 +928,8 @@ def main():
                 'taxa_cambio': st.session_state.taxa_cambio,
                 'taxa_desconto': taxa_desconto,
                 'rendimento_base': rendimento_base,
+                'rendimento_arroz_base': rendimento_arroz,
+                'rendimento_trigo_base': rendimento_trigo,
                 'preco_arroz': preco_arroz,
                 'preco_trigo': preco_trigo,
                 'preco_produto': preco_produto,
@@ -870,15 +961,32 @@ def main():
             - **Área:** {formatar_br(area_total)} ha
             - **Período:** {anos_simulacao} anos
             - **Taxa de desconto:** {formatar_br(taxa_desconto * 100)}%
-            - **Produto:** {dados_estudo['descricao_produto']}
             """)
             
             if estudo_selecionado == 'shakoor_et_al':
+                # Calcular valores detalhados para Shakoor et al.
+                valor_total_conv, valor_total_ha_conv, valor_arroz_conv, valor_trigo_conv = calcular_valor_rendimento_estudo_shakoor(
+                    rendimento_arroz, rendimento_trigo, preco_arroz, preco_trigo, area_total
+                )
+                
+                # Calcular valores ajustados para CRF
+                rendimento_arroz_crf = rendimento_arroz * (1 + dados_estudo['aumento_rendimento']/100)
+                rendimento_trigo_crf = rendimento_trigo * (1 + dados_estudo['aumento_rendimento']/100)
+                
+                valor_total_crf, valor_total_ha_crf, valor_arroz_crf, valor_trigo_crf = calcular_valor_rendimento_estudo_shakoor(
+                    rendimento_arroz_crf, rendimento_trigo_crf, preco_arroz, preco_trigo, area_total
+                )
+                
                 st.info(f"""
-                **💰 Preços dos Produtos:**
-                - **Arroz:** R$ {formatar_br(preco_arroz)}/ton
-                - **Trigo:** R$ {formatar_br(preco_trigo)}/ton
-                - **Preço médio ponderado:** R$ {formatar_br(preco_produto)}/ton
+                **🌾 Rendimentos Base (Convencional):**
+                - **Arroz:** {formatar_br(rendimento_arroz)} ton/ha = R$ {formatar_br(rendimento_arroz * preco_arroz)}/ha
+                - **Trigo:** {formatar_br(rendimento_trigo)} ton/ha = R$ {formatar_br(rendimento_trigo * preco_trigo)}/ha
+                - **Total:** {formatar_br(rendimento_arroz + rendimento_trigo)} ton/ha = R$ {formatar_br(valor_total_ha_conv)}/ha
+                
+                **🌾 Rendimentos Ajustados (CRF - +{dados_estudo['aumento_rendimento']}%):**
+                - **Arroz:** {formatar_br(rendimento_arroz_crf)} ton/ha = R$ {formatar_br(rendimento_arroz_crf * preco_arroz)}/ha
+                - **Trigo:** {formatar_br(rendimento_trigo_crf)} ton/ha = R$ {formatar_br(rendimento_trigo_crf * preco_trigo)}/ha
+                - **Total:** {formatar_br(rendimento_arroz_crf + rendimento_trigo_crf)} ton/ha = R$ {formatar_br(valor_total_ha_crf)}/ha
                 """)
             
             # NOVA SEÇÃO: VALOR FINANCEIRO DAS EMISSÕES EVITADAS
@@ -961,7 +1069,7 @@ def main():
             # Gráfico de barras horizontal (igual ao scriptv2)
             fig_sobol, ax_sobol = plt.subplots(figsize=(10, 6))
             sns.barplot(x='ST', y='Parâmetro', data=sensibilidade_df, palette='viridis', ax=ax_sobol)
-            ax_sobol.set_title('Sensibilidade Global dos Parâmetros (Índice Sobol Total)')
+            ax_sobol.set_title('Sensibilidade Global dos Parêmetros (Índice Sobol Total)')
             ax_sobol.set_xlabel('Índice ST')
             ax_sobol.set_ylabel('')
             ax_sobol.grid(axis='x', linestyle='--', alpha=0.7)
@@ -1056,34 +1164,73 @@ def main():
             # Informações adicionais de valor
             st.subheader("📊 Impacto Financeiro Total")
             
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric(
-                    "Valor do Rendimento (Convencional)",
-                    f"R$ {formatar_br(valor_rendimento_conv)}",
-                    help=f"Valor da produção com fertilizante convencional"
-                )
-            
-            with col2:
-                st.metric(
-                    "Valor do Rendimento (CRF)",
-                    f"R$ {formatar_br(valor_rendimento_crf)}",
-                    delta=f"R$ {formatar_br(valor_rendimento_adicional)}",
-                    help=f"Valor da produção com fertilizante CRF"
-                )
-            
-            with col3:
-                # Cálculo do resultado líquido total
-                custo_adicional_total = custo_crf - custo_convencional
-                resultado_liquido_total = receita_carbono_real + valor_rendimento_adicional - custo_adicional_total
+            if estudo_selecionado == 'ji_et_al':
+                col1, col2, col3 = st.columns(3)
                 
-                st.metric(
-                    "Resultado Líquido Total",
-                    f"R$ {formatar_br(resultado_liquido_total)}",
-                    delta=f"R$ {formatar_br(resultado_liquido_total/area_total)}/ha" if area_total > 0 else "N/A",
-                    help=f"Receita carbono + valor rendimento adicional - custo adicional CRF"
-                )
+                with col1:
+                    st.metric(
+                        "Valor do Rendimento (Convencional)",
+                        f"R$ {formatar_br(valor_rendimento_conv)}",
+                        help=f"Valor da produção de arroz com fertilizante convencional"
+                    )
+                
+                with col2:
+                    st.metric(
+                        "Valor do Rendimento (CRF)",
+                        f"R$ {formatar_br(valor_rendimento_crf)}",
+                        delta=f"R$ {formatar_br(valor_rendimento_adicional)}",
+                        help=f"Valor da produção de arroz com fertilizante CRF"
+                    )
+                
+                with col3:
+                    # Cálculo do resultado líquido total
+                    custo_adicional_total = custo_crf - custo_convencional
+                    resultado_liquido_total = receita_carbono_real + valor_rendimento_adicional - custo_adicional_total
+                    
+                    st.metric(
+                        "Resultado Líquido Total",
+                        f"R$ {formatar_br(resultado_liquido_total)}",
+                        delta=f"R$ {formatar_br(resultado_liquido_total/area_total)}/ha" if area_total > 0 else "N/A",
+                        help=f"Receita carbono + valor rendimento adicional - custo adicional CRF"
+                    )
+            else:  # shakoor_et_al
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric(
+                        "Valor Arroz (CRF)",
+                        f"R$ {formatar_br(valor_arroz_crf)}",
+                        delta=f"R$ {formatar_br(valor_arroz_crf - valor_arroz_conv)}",
+                        help="Valor da produção de arroz com CRF"
+                    )
+                
+                with col2:
+                    st.metric(
+                        "Valor Trigo (CRF)",
+                        f"R$ {formatar_br(valor_trigo_crf)}",
+                        delta=f"R$ {formatar_br(valor_trigo_crf - valor_trigo_conv)}",
+                        help="Valor da produção de trigo com CRF"
+                    )
+                
+                with col3:
+                    st.metric(
+                        "Valor Total (CRF)",
+                        f"R$ {formatar_br(valor_total_crf)}",
+                        delta=f"R$ {formatar_br(valor_total_crf - valor_total_conv)}",
+                        help="Valor total da produção com CRF"
+                    )
+                
+                with col4:
+                    # Cálculo do resultado líquido total
+                    custo_adicional_total = custo_crf - custo_convencional
+                    resultado_liquido_total = receita_carbono_real + (valor_total_crf - valor_total_conv) - custo_adicional_total
+                    
+                    st.metric(
+                        "Resultado Líquido Total",
+                        f"R$ {formatar_br(resultado_liquido_total)}",
+                        delta=f"R$ {formatar_br(resultado_liquido_total/area_total)}/ha" if area_total > 0 else "N/A",
+                        help=f"Receita carbono + valor rendimento adicional - custo adicional CRF"
+                    )
             
             # Gráfico de Fluxo de Caixa
             fig_fluxo, ax_fluxo = plt.subplots(figsize=(10, 6))
@@ -1227,7 +1374,8 @@ def main():
                 'Sistema': dados['sistema'],
                 'Redução de Emissões': f"{dados['reducao_percentual']}%",
                 'Impacto no Rendimento': f"{dados.get('reducao_rendimento', dados.get('aumento_rendimento', 0))}%",
-                'Rendimento Base': f"{dados['rendimento_base']} {dados['unidade_rendimento']}",
+                'Rendimento Base': f"Arroz: {dados['rendimento_arroz_base']} ton/ha" + 
+                                  (f", Trigo: {dados['rendimento_trigo_base']} ton/ha" if dados['rendimento_trigo_base'] else ""),
                 'Produto': dados['descricao_produto']
             })
         
