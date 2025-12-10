@@ -891,7 +891,7 @@ def main():
             
             with col1:
                 st.metric(
-                    "Redução de Emissões",
+                    "Emissões Evitadas",
                     f"{formatar_br(reducao_tco2eq_total)} tCO₂eq",
                     delta=f"{formatar_br(dados_estudo['reducao_percentual'])}%"
                 )
