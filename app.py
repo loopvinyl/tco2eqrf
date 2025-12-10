@@ -725,9 +725,10 @@ def main():
     executar_simulacao = st.session_state.get('executar_simulacao', False)
     sensibilidade_significativa = pd.DataFrame()  # Inicializar variável
         
-        if executar_simulacao:
+    if executar_simulacao:
     sensibilidade_significativa = pd.DataFrame()
     with st.spinner('Executando simulação...'):
+        
                 # Inicializar variáveis com valores padrão
                 emissao_conv_kg = 0
                 emissao_crf_kg = 0
