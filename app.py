@@ -322,7 +322,7 @@ inicializar_session_state()
 # CONSTANTES E PARÂMETROS DO ARTIGO
 # =============================================================================
 
-# Dados dos artigos (Ji et al., 2013 e Shakoor et al., 2018)
+# Dados dos artigos (Ji et al., 2013; Shakoor et al., 2018; Zhang et al., 2025)
 DADOS_ARTIGOS = {
     'ji_et_al': {
         'nome': 'Ji et al. (2013) - Sistema Arroz',
@@ -345,6 +345,17 @@ DADOS_ARTIGOS = {
         'aumento_rendimento': 3.0,  # % aumento no rendimento
         'cultura': 'Arroz-Trigo',
         'sistema': 'Rotação'
+    },
+    'zhang_et_al_2025': {
+        'nome': 'Zhang et al. (2025) - Sistema Trigo em Solos Salino-Alcalinos',
+        'emissao_convencional': 0.91,  # kg N ha⁻¹ (convertido de N₂O)
+        'emissao_crf': 0.37,  # kg N ha⁻¹ (convertido de N₂O)
+        'area': 'ha',
+        'conversao_ha': 1.0,
+        'reducao_percentual': 59.4,
+        'aumento_rendimento': 11.5,  # % aumento no rendimento
+        'cultura': 'Trigo',
+        'sistema': 'Solos Salino-Alcalinos (CRF duas aplicações)'
     }
 }
 
@@ -410,8 +421,8 @@ def calcular_rendimento(tipo, rendimento_base, area_ha, estudo):
     else:  # CRF
         if estudo == 'ji_et_al':
             fator_ajuste = 1 + (dados['reducao_rendimento'] / 100)  # -5% no Ji et al.
-        else:  # shakoor_et_al
-            fator_ajuste = 1 + (dados['aumento_rendimento'] / 100)  # +3% no Shakoor et al.
+        else:  # shakoor_et_al ou zhang_et_al_2025
+            fator_ajuste = 1 + (dados['aumento_rendimento'] / 100)  # +3% no Shakoor et al., +11.5% no Zhang et al.
     
     rendimento_ajustado_ha = rendimento_base * fator_ajuste
     rendimento_total = rendimento_ajustado_ha * area_ha
@@ -564,7 +575,7 @@ def simulacao_monte_carlo(params_base, n_simulacoes=1000):
         
         # Benefício de rendimento (se aplicável)
         beneficio_rendimento_ha = 0
-        if params.get('estudo') == 'shakoor_et_al':
+        if params.get('estudo') in ['shakoor_et_al', 'zhang_et_al_2025']:
             rendimento_base = params.get('rendimento_base', 5)  # ton/ha
             aumento = params.get('aumento_rendimento', 3) / 100
             beneficio_rendimento_ha = rendimento_base * aumento * params.get('preco_produto', 1000)
@@ -624,6 +635,7 @@ def main():
     **Baseado nos estudos:**
     - Ji et al. (2013): Sistema arroz com MSA (Mid-Season Aeration)
     - Shakoor et al. (2018): Sistema rotação arroz-trigo
+    - Zhang et al. (2025): Sistema trigo em solos salino-alcalinos
     
     **Objetivo:** Analisar a viabilidade econômica e ambiental da transição
     """)
@@ -841,7 +853,7 @@ def main():
                 'dosagem_n': dosagem_n           # Usando valor da sidebar
             }
             
-            if estudo_selecionado == 'shakoor_et_al':
+            if estudo_selecionado in ['shakoor_et_al', 'zhang_et_al_2025']:
                 params_base_mc['aumento_rendimento'] = dados_estudo['aumento_rendimento']
             
             resultados_mc = simulacao_monte_carlo(params_base_mc, n_simulacoes=1000)
@@ -1207,7 +1219,7 @@ def main():
                     - **Preço do carbono atual:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
                     - **Custo adicional do CRF:** R$ {formatar_br(custo_crf - custo_convencional)} ({formatar_br(((custo_crf_ha/custo_conv_ha)-1)*100)}% mais caro)
                     """)
-                else:
+                elif estudo_selecionado == 'shakoor_et_al':
                     st.info(f"""
                     **Shakoor et al. (2018) - Sistema Arroz-Trigo:**
                     - CRF reduz emissões em {formatar_br(dados_estudo['reducao_percentual'])}% e aumenta rendimento em {formatar_br(dados_estudo['aumento_rendimento'])}%
@@ -1216,6 +1228,16 @@ def main():
                     - **Preço do carbono atual:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
                     - **Custo adicional do CRF:** R$ {formatar_br(custo_crf - custo_convencional)} ({formatar_br(((custo_crf_ha/custo_conv_ha)-1)*100)}% mais caro)
                     """)
+                else:  # zhang_et_al_2025
+                    st.info(f"""
+                    **Zhang et al. (2025) - Sistema Trigo em Solos Salino-Alcalinos:**
+                    - CRF com duas aplicações reduz emissões em {formatar_br(dados_estudo['reducao_percentual'])}% e aumenta rendimento em {formatar_br(dados_estudo['aumento_rendimento'])}%
+                    - Sistema otimizado para solos salino-alcalinos (EC 4.6-4.9 dS/m)
+                    - Maior redução de emissões entre todos os estudos (59,4%)
+                    - **Preço do carbono atual:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
+                    - **Custo adicional do CRF:** R$ {formatar_br(custo_crf - custo_convencional)} ({formatar_br(((custo_crf_ha/custo_conv_ha)-1)*100)}% mais caro)
+                    - **Recomendação:** Duas aplicações de CRF (50% basal + 50% na fase de perfilhamento)
+                    """)
     
     else:
         # Tela inicial
@@ -1223,7 +1245,7 @@ def main():
         ### 💡 Como usar este simulador:
         
         1. **Acompanhe as cotações do carbono e câmbio** na seção superior da barra lateral
-        2. **Selecione o estudo base** na seção de configuração (Ji et al. 2013 ou Shakoor et al. 2018)
+        2. **Selecione o estudo base** na seção de configuração (Ji et al. 2013, Shakoor et al. 2018 ou Zhang et al. 2025)
         3. **Configure os parâmetros** da sua operação (área, rendimento, preços)
         4. **Clique em "Executar Simulação Completa"**
         5. **Analise os resultados** de viabilidade econômica e ambiental
