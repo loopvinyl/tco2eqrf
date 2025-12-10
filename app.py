@@ -1009,54 +1009,8 @@ def main():
                     """)
             
             # =================================================================
-            # 10. DOWNLOAD DOS RESULTADOS
+            # (Removida a seção de Download dos Resultados)
             # =================================================================
-            st.subheader("💾 Download dos Resultados")
-            
-            # Preparar dados para exportação
-            dados_exportacao = {
-                'Parâmetros de Entrada': {
-                    'Estudo Base': dados_estudo['nome'],
-                    'Área Total (ha)': area_total,
-                    'Anos Simulação': anos_simulacao,
-                    'Rendimento Base (ton/ha)': rendimento_base,
-                    'Preço Produto (R$/ton)': preco_produto,
-                    'Preço Carbono (€/tCO₂eq)': st.session_state.preco_carbono,
-                    'Taxa Câmbio (€→R$)': st.session_state.taxa_cambio,
-                    'Taxa Desconto (%)': taxa_desconto * 100
-                },
-                'Resultados Principais': {
-                    'Redução Emissões (tCO₂eq)': reducao_tco2eq_total,
-                    'Receita Carbono (R$)': receita_carbono_real,
-                    'Custo Convencional (R$)': custo_convencional,
-                    'Custo CRF (R$)': custo_crf,
-                    'Custo Adicional (R$)': custo_crf - custo_convencional,
-                    'Rendimento Convencional (ton)': rendimento_conv,
-                    'Rendimento CRF (ton)': rendimento_crf,
-                    'VPL Total (R$)': resultados_viabilidade['vpl'] * area_total,
-                    'VPL/ha (R$)': resultados_viabilidade['vpl'],
-                    'Payback (anos)': resultados_viabilidade['payback'],
-                    'Probabilidade Viabilidade (%)': probabilidade_viabilidade
-                }
-            }
-            
-            df_exportar = pd.DataFrame([
-                {'Categoria': 'Entrada', 'Parâmetro': k, 'Valor': v} 
-                for k, v in dados_exportacao['Parâmetros de Entrada'].items()
-            ] + [
-                {'Categoria': 'Resultado', 'Parâmetro': k, 'Valor': v} 
-                for k, v in dados_exportacao['Resultados Principais'].items()
-            ])
-            
-            # Converter para CSV
-            csv = df_exportar.to_csv(index=False)
-            
-            st.download_button(
-                label="📥 Baixar Resultados (CSV)",
-                data=csv,
-                file_name=f"resultados_fertilizantes_{estudo_selecionado}.csv",
-                mime="text/csv"
-            )
     
     else:
         # Tela inicial
@@ -1098,4 +1052,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
