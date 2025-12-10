@@ -217,32 +217,6 @@ def exibir_cotacao_carbono():
         value=f"R$ {formatar_br(preco_carbono_reais)}",
         help="Preço do carbono convertido para Reais Brasileiros"
     )
-    
-    # Informações adicionais
-    with st.sidebar.expander("ℹ️ Informações do Mercado de Carbono"):
-        st.markdown(f"""
-        **📊 Cotações Atuais:**
-        - **Fonte do Carbono:** {st.session_state.fonte_cotacao}
-        - **Preço Atual:** {st.session_state.moeda_carbono} {formatar_br(st.session_state.preco_carbono)}/tCO₂eq
-        - **Câmbio EUR/BRL:** 1 Euro = R$ {formatar_br(st.session_state.taxa_cambio)}
-        - **Carbono em Reais:** R$ {formatar_br(preco_carbono_reais)}/tCO₂eq
-        
-        **🌍 Mercado de Referência:**
-        - European Union Allowances (EUA)
-        - European Emissions Trading System (EU ETS)
-        - Contratos futuros de carbono
-        - Preços em tempo real
-        
-        **🔄 Atualização:**
-        - As cotações são carregadas automaticamente ao abrir o aplicativo
-        - Clique em **"Atualizar Cotações"** para obter valores mais recentes
-        - Em caso de falha na conexão, são utilizados valores de referência atualizados
-        
-        **💡 Importante:**
-        - Os preços são baseados no mercado regulado da UE
-        - Valores em tempo real sujeitos a variações de mercado
-        - Conversão para Real utilizando câmbio comercial
-        """)
 
 # =============================================================================
 # INICIALIZAÇÃO DA SESSION STATE
@@ -658,34 +632,14 @@ def main():
             step=50
         )
         
-        # Configurações avançadas
-        with st.expander("🔧 Parâmetros Avançados"):
-            # Usar preço do carbono da cotação automática por padrão
-            preco_carbono_eur = st.number_input(
-                "Preço do Carbono (€/tCO₂eq) - Sobrescrever",
-                min_value=10.0,
-                max_value=200.0,
-                value=st.session_state.preco_carbono,
-                step=5.0,
-                help="Valor da cotação atual: € " + formatar_br(st.session_state.preco_carbono)
-            )
-            
-            taxa_cambio = st.number_input(
-                "Taxa Câmbio (€ → R$) - Sobrescrever",
-                min_value=4.0,
-                max_value=7.0,
-                value=st.session_state.taxa_cambio,
-                step=0.1,
-                help="Taxa atual: 1 Euro = R$ " + formatar_br(st.session_state.taxa_cambio)
-            )
-            
-            taxa_desconto = st.slider(
-                "Taxa de Desconto (%)",
-                min_value=1.0,
-                max_value=15.0,
-                value=6.0,
-                step=0.5
-            ) / 100
+        # Taxa de desconto
+        taxa_desconto = st.slider(
+            "Taxa de Desconto (%)",
+            min_value=1.0,
+            max_value=15.0,
+            value=6.0,
+            step=0.5
+        ) / 100
         
         # Botão de execução
         if st.button("🚀 Executar Simulação Completa", type="primary", use_container_width=True):
@@ -731,8 +685,8 @@ def main():
             # Calcular receita do carbono
             receita_carbono_real, receita_carbono_eur = calcular_receita_carbono(
                 reducao_tco2eq_total,
-                preco_carbono_eur,
-                taxa_cambio
+                st.session_state.preco_carbono,
+                st.session_state.taxa_cambio
             )
             
             # Calcular receita por hectare
@@ -752,8 +706,8 @@ def main():
                 'custo_convencional_ha': custo_conv_ha,
                 'custo_crf_ha': custo_crf_ha,
                 'receita_carbono_ha': receita_carbono_ha,
-                'preco_carbono': preco_carbono_eur,
-                'taxa_cambio': taxa_cambio,
+                'preco_carbono': st.session_state.preco_carbono,
+                'taxa_cambio': st.session_state.taxa_cambio,
                 'taxa_desconto': taxa_desconto,
                 'rendimento_base': rendimento_base,
                 'preco_produto': preco_produto,
@@ -778,8 +732,8 @@ def main():
             params_base_mc = {
                 'emissao_convencional': emissao_conv_kg,
                 'emissao_crf': emissao_crf_kg,
-                'preco_carbono': preco_carbono_eur,
-                'taxa_cambio': taxa_cambio,
+                'preco_carbono': st.session_state.preco_carbono,
+                'taxa_cambio': st.session_state.taxa_cambio,
                 'estudo': estudo_selecionado,
                 'rendimento_base': rendimento_base,
                 'preco_produto': preco_produto
@@ -804,7 +758,7 @@ def main():
                     'Custo Adicional (R$/ha)'
                 ],
                 'bounds': [
-                    [50, 150],  # Preço carbono
+                    [max(50, st.session_state.preco_carbono * 0.7), st.session_state.preco_carbono * 1.3],  # Preço carbono
                     [0, 10],    # Aumento rendimento
                     [0.1, 1.5], # Diferença emissões
                     [100, 500]  # Custo adicional
@@ -822,15 +776,15 @@ def main():
             st.subheader("💰 Valor Financeiro das Emissões Evitadas")
             
             # Calcular valores financeiros em Euros e Reais
-            valor_emissoes_eur = calcular_valor_creditos(reducao_tco2eq_total, preco_carbono_eur, "€")
-            valor_emissoes_brl = calcular_valor_creditos(reducao_tco2eq_total, preco_carbono_eur, "R$", taxa_cambio)
+            valor_emissoes_eur = calcular_valor_creditos(reducao_tco2eq_total, st.session_state.preco_carbono, "€")
+            valor_emissoes_brl = calcular_valor_creditos(reducao_tco2eq_total, st.session_state.preco_carbono, "R$", st.session_state.taxa_cambio)
             
             # Primeira linha: Euros
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric(
                     f"Preço Carbono (Euro)", 
-                    f"€ {formatar_br(preco_carbono_eur)}/tCO₂eq",
+                    f"€ {formatar_br(st.session_state.preco_carbono)}/tCO₂eq",
                     help="Preço do carbono em Euros"
                 )
             with col2:
@@ -851,14 +805,14 @@ def main():
             with col1:
                 st.metric(
                     f"Preço Carbono (R$)", 
-                    f"R$ {formatar_br(preco_carbono_eur * taxa_cambio)}/tCO₂eq",
+                    f"R$ {formatar_br(st.session_state.preco_carbono * st.session_state.taxa_cambio)}/tCO₂eq",
                     help="Preço do carbono convertido para Reais"
                 )
             with col2:
                 st.metric(
                     "Taxa de Câmbio", 
-                    f"R$ {formatar_br(taxa_cambio)}",
-                    help="1 Euro = R$ " + formatar_br(taxa_cambio)
+                    f"R$ {formatar_br(st.session_state.taxa_cambio)}",
+                    help="1 Euro = R$ " + formatar_br(st.session_state.taxa_cambio)
                 )
             with col3:
                 st.metric(
@@ -998,7 +952,7 @@ def main():
                     reducao_ha = reducao_tco2eq_total / area_total
                     if reducao_ha > 0:
                         preco_minimo_ha = (custo_adicional_ha - beneficio_rendimento_ha) / reducao_ha
-                        preco_minimo_eur = preco_minimo_ha / taxa_cambio
+                        preco_minimo_eur = preco_minimo_ha / st.session_state.taxa_cambio
                         
                         st.metric(
                             "Preço Mínimo do Carbono para Viabilidade",
@@ -1017,12 +971,13 @@ def main():
             # =================================================================
             st.subheader("🌍 Análise por Cenário")
             
-            # Criar cenários
+            # Criar cenários baseados no preço atual
+            preco_base = st.session_state.preco_carbono
             cenarios = [
-                {'nome': 'Cenário Atual', 'preco_carbono': preco_carbono_eur, 'taxa_cambio': taxa_cambio},
-                {'nome': 'Mercado em Expansão', 'preco_carbono': 120, 'taxa_cambio': taxa_cambio},
-                {'nome': 'Alta do Carbono', 'preco_carbono': 150, 'taxa_cambio': taxa_cambio},
-                {'nome': 'Mercado Regulado', 'preco_carbono': 200, 'taxa_cambio': taxa_cambio}
+                {'nome': 'Cenário Atual', 'preco_carbono': preco_base, 'taxa_cambio': st.session_state.taxa_cambio},
+                {'nome': 'Mercado em Expansão', 'preco_carbono': preco_base * 1.4, 'taxa_cambio': st.session_state.taxa_cambio},
+                {'nome': 'Alta do Carbono', 'preco_carbono': preco_base * 1.8, 'taxa_cambio': st.session_state.taxa_cambio},
+                {'nome': 'Mercado Regulado', 'preco_carbono': preco_base * 2.3, 'taxa_cambio': st.session_state.taxa_cambio}
             ]
             
             resultados_cenarios = []
@@ -1074,6 +1029,17 @@ def main():
                 4. Aproveitar ganhos de produtividade (se aplicável)
                 """)
             else:
+                # Calcular preço mínimo se não estiver disponível
+                if 'preco_minimo_eur' not in locals():
+                    custo_adicional_ha = custo_crf_ha - custo_conv_ha
+                    beneficio_rendimento_ha = max(0, (rendimento_crf_ha - rendimento_conv_ha) * preco_produto)
+                    reducao_ha = reducao_tco2eq_total / area_total
+                    if reducao_ha > 0:
+                        preco_minimo_ha = (custo_adicional_ha - beneficio_rendimento_ha) / reducao_ha
+                        preco_minimo_eur = preco_minimo_ha / st.session_state.taxa_cambio
+                    else:
+                        preco_minimo_eur = 0
+                
                 st.warning(f"""
                 **⚠️ PROJETO NÃO VIÁVEL NO CENÁRIO ATUAL**
                 
@@ -1084,7 +1050,7 @@ def main():
                 **Estratégias para viabilizar:**
                 1. Buscar subsídios governamentais para transição
                 2. Negociar desconto com fornecedores de CRF
-                3. Esperar aumento no preço do carbono (viável a partir de € {formatar_br(preco_minimo_eur if 'preco_minimo_eur' in locals() else 0)}/tCO₂eq)
+                3. Esperar aumento no preço do carbono (viável a partir de € {formatar_br(preco_minimo_eur)}/tCO₂eq)
                 4. Focar no aumento de produtividade como principal benefício
                 5. Considerar combinação CRF + ureia para reduzir custos
                 """)
@@ -1105,56 +1071,6 @@ def main():
                     - Sistema de rotação otimiza benefícios
                     - Viabilidade mais provável devido ao duplo benefício
                     """)
-            
-            # =================================================================
-            # 10. DOWNLOAD DOS RESULTADOS
-            # =================================================================
-            st.subheader("💾 Download dos Resultados")
-            
-            # Preparar dados para exportação
-            dados_exportacao = {
-                'Parâmetros de Entrada': {
-                    'Estudo Base': dados_estudo['nome'],
-                    'Área Total (ha)': area_total,
-                    'Anos Simulação': anos_simulacao,
-                    'Rendimento Base (ton/ha)': rendimento_base,
-                    'Preço Produto (R$/ton)': preco_produto,
-                    'Preço Carbono (€/tCO₂eq)': preco_carbono_eur,
-                    'Taxa Câmbio (€→R$)': taxa_cambio,
-                    'Taxa Desconto (%)': taxa_desconto * 100
-                },
-                'Resultados Principais': {
-                    'Redução Emissões (tCO₂eq)': reducao_tco2eq_total,
-                    'Receita Carbono (R$)': receita_carbono_real,
-                    'Custo Convencional (R$)': custo_convencional,
-                    'Custo CRF (R$)': custo_crf,
-                    'Custo Adicional (R$)': custo_crf - custo_convencional,
-                    'Rendimento Convencional (ton)': rendimento_conv,
-                    'Rendimento CRF (ton)': rendimento_crf,
-                    'VPL Total (R$)': resultados_viabilidade['vpl'] * area_total,
-                    'VPL/ha (R$)': resultados_viabilidade['vpl'],
-                    'Payback (anos)': resultados_viabilidade['payback'],
-                    'Probabilidade Viabilidade (%)': probabilidade_viabilidade
-                }
-            }
-            
-            df_exportar = pd.DataFrame([
-                {'Categoria': 'Entrada', 'Parâmetro': k, 'Valor': v} 
-                for k, v in dados_exportacao['Parâmetros de Entrada'].items()
-            ] + [
-                {'Categoria': 'Resultado', 'Parâmetro': k, 'Valor': v} 
-                for k, v in dados_exportacao['Resultados Principais'].items()
-            ])
-            
-            # Converter para CSV
-            csv = df_exportar.to_csv(index=False)
-            
-            st.download_button(
-                label="📥 Baixar Resultados (CSV)",
-                data=csv,
-                file_name=f"resultados_fertilizantes_{estudo_selecionado}.csv",
-                mime="text/csv"
-            )
     
     else:
         # Tela inicial
@@ -1163,7 +1079,7 @@ def main():
         
         1. **Ajuste a cotação do carbono** na barra lateral (atualizada automaticamente)
         2. **Selecione o estudo base** na barra lateral (Ji et al. 2013 ou Shakoor et al. 2018)
-        3. **Configure os parâmetros** da sua operação (área, rendimento, preços)
+        3. **Configure os parâmetros** da sua operação (área, rendimento, preços, taxa de desconto)
         4. **Clique em "Executar Simulação Completa"**
         5. **Analise os resultados** de viabilidade econômica e ambiental
         
