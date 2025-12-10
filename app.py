@@ -602,6 +602,9 @@ def analise_sensibilidade_sobol_completa(params_base, n_amostras=100):
 # =============================================================================
 
 def main():
+    # Inicializar a variável de mensagem de erro para evitar UnboundLocalError
+    error_message = None
+    
     try:
         st.title("🌾 Simulador de Fertilizantes Nitrogenados")
         st.markdown("""
@@ -1119,7 +1122,12 @@ def main():
             st.dataframe(df_comparacao)
     
     except Exception as error:
-        st.error(f"Ocorreu um erro no aplicativo: {str(error)}")
+        # Armazenar a mensagem de erro na variável previamente inicializada
+        error_message = f"Ocorreu um erro no aplicativo: {str(error)}"
+    
+    # Exibir a mensagem de erro apenas se houve um erro
+    if error_message is not None:
+        st.error(error_message)
         st.info("""
         **Solução de problemas:**
         1. Tente recarregar a página
