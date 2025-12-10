@@ -348,17 +348,16 @@ DADOS_ARTIGOS = {
     }
 }
 
-# Parâmetros econômicos (valores de mercado)
-PRECO_UREIA = 1500  # R$/tonelada (preço médio)
-PRECO_CRF = 2500    # R$/tonelada (preço médio, ajustado conforme dados)
-DOSAGEM_N = 240     # kg N ha⁻¹ (dosagem típica)
-
-# Fatores de conversão
+# Fatores de conversão (mantidos fixos baseados nos artigos)
 FATOR_N_PARA_N2O = 44/28  # 1,571 (conversão de N para N2O)
 GWP_N2O = 273  # Potencial de aquecimento global do N2O (100 anos)
 
+# Teores de nitrogênio nos fertilizantes (baseado nos artigos)
+TEOR_N_UREIA = 0.46  # 46% N na ureia
+TEOR_N_CRF = 0.42    # 42% N no CRF (exemplo do artigo)
+
 # =============================================================================
-# FUNÇÕES DE CÁLCULO
+# FUNÇÕES DE CÁLCULO ATUALIZADAS
 # =============================================================================
 
 def converter_emissao_para_tCO2eq(emissao_kg_N_ha, area_ha):
@@ -378,19 +377,23 @@ def converter_emissao_para_tCO2eq(emissao_kg_N_ha, area_ha):
     
     return total_tco2eq, tco2eq
 
-def calcular_custo_fertilizante(tipo, area_ha):
+def calcular_custo_fertilizante(tipo, area_ha, preco_ureia, preco_crf, dosagem_n):
     """
     Calcula custo anual dos fertilizantes
     
-    ureia: 46% N
-    CRF: 42% N (exemplo do artigo)
+    Args:
+        tipo: 'convencional' ou 'crf'
+        area_ha: área em hectares
+        preco_ureia: R$/ton (da sidebar)
+        preco_crf: R$/ton (da sidebar)
+        dosagem_n: kg N/ha (da sidebar)
     """
     if tipo.lower() == 'convencional':
-        kg_ureia = DOSAGEM_N / 0.46  # kg de ureia por ha (46% N)
-        custo_ha = (kg_ureia / 1000) * PRECO_UREIA
+        kg_ureia = dosagem_n / TEOR_N_UREIA  # kg de ureia por ha (46% N)
+        custo_ha = (kg_ureia / 1000) * preco_ureia
     else:  # CRF
-        kg_crf = DOSAGEM_N / 0.42  # kg de CRF per ha (42% N)
-        custo_ha = (kg_crf / 1000) * PRECO_CRF
+        kg_crf = dosagem_n / TEOR_N_CRF  # kg de CRF por ha (42% N)
+        custo_ha = (kg_crf / 1000) * preco_crf
     
     custo_total = custo_ha * area_ha
     
@@ -524,6 +527,16 @@ def simulacao_monte_carlo(params_base, n_simulacoes=1000):
                 abs(params_base['aumento_rendimento']) * 0.1
             )
         
+        # Incerteza nos preços dos fertilizantes (±15%)
+        params['preco_ureia'] = np.random.normal(
+            params_base['preco_ureia'],
+            params_base['preco_ureia'] * 0.15
+        )
+        params['preco_crf'] = np.random.normal(
+            params_base['preco_crf'],
+            params_base['preco_crf'] * 0.15
+        )
+        
         # Recalcular resultados
         reducao_ha = converter_emissao_para_tCO2eq(
             params['emissao_convencional'] - params['emissao_crf'],
@@ -536,8 +549,17 @@ def simulacao_monte_carlo(params_base, n_simulacoes=1000):
             params.get('taxa_cambio', 5.5)
         )[0]
         
-        custo_convencional_ha = calcular_custo_fertilizante('convencional', 1)[1]
-        custo_crf_ha = calcular_custo_fertilizante('crf', 1)[1]
+        # Usar preços com incerteza
+        custo_convencional_ha = calcular_custo_fertilizante(
+            'convencional', 1, 
+            params['preco_ureia'], params['preco_crf'], 
+            params.get('dosagem_n', 240)
+        )[1]
+        custo_crf_ha = calcular_custo_fertilizante(
+            'crf', 1, 
+            params['preco_ureia'], params['preco_crf'], 
+            params.get('dosagem_n', 240)
+        )[1]
         custo_adicional_ha = custo_crf_ha - custo_convencional_ha
         
         # Benefício de rendimento (se aplicável)
@@ -654,6 +676,56 @@ def main():
             step=50
         )
         
+        # NOVA SEÇÃO: Preços dos Fertilizantes
+        st.subheader("💰 Preços dos Fertilizantes (R$/tonelada)")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            preco_ureia = st.number_input(
+                "Ureia Convencional",
+                min_value=1000,
+                max_value=3000,
+                value=1500,
+                step=50,
+                help="Preço atual da ureia (46% N)"
+            )
+            
+        with col2:
+            preco_crf = st.number_input(
+                "Fertilizante CRF",
+                min_value=1500,
+                max_value=5000,
+                value=2500,
+                step=50,
+                help="Preço do fertilizante de liberação controlada (42% N)"
+            )
+        
+        dosagem_n = st.slider(
+            "Dosagem de Nitrogênio (kg N/ha)",
+            min_value=100,
+            max_value=400,
+            value=240,
+            step=10,
+            help="Quantidade de nitrogênio aplicada por hectare"
+        )
+        
+        # Informação adicional sobre faixas de preço
+        with st.expander("💡 Informações sobre preços médios"):
+            st.markdown("""
+            **Faixas de Preço de Referência (2024):**
+            
+            | Fertilizante | Faixa Típica (R$/ton) | Observação |
+            |--------------|----------------------|------------|
+            | **Ureia** | 1.400 - 2.400 | Varia com região e época |
+            | **CRF** | 2.500 - 4.500 | Depende da tecnologia/marca |
+            
+            **Fontes:**
+            - CONAB (Companhia Nacional de Abastecimento)
+            - CEPEA/ESALQ (Centro de Estudos Avançados)
+            - Mercado local
+            """)
+        
         # Configurações avançadas
         with st.expander("🔧 Parâmetros Avançados"):
             taxa_desconto = st.slider(
@@ -693,9 +765,13 @@ def main():
             reducao_kg_N = emissao_conv_kg - emissao_crf_kg
             reducao_tco2eq_total, reducao_tco2eq_ha = converter_emissao_para_tCO2eq(reducao_kg_N, area_total)
             
-            # Calcular custos dos fertilizantes
-            custo_convencional, custo_conv_ha = calcular_custo_fertilizante('convencional', area_total)
-            custo_crf, custo_crf_ha = calcular_custo_fertilizante('crf', area_total)
+            # Calcular custos dos fertilizantes (usando preços da sidebar)
+            custo_convencional, custo_conv_ha = calcular_custo_fertilizante(
+                'convencional', area_total, preco_ureia, preco_crf, dosagem_n
+            )
+            custo_crf, custo_crf_ha = calcular_custo_fertilizante(
+                'crf', area_total, preco_ureia, preco_crf, dosagem_n
+            )
             
             # Calcular rendimentos
             rendimento_conv, rendimento_conv_ha = calcular_rendimento(
@@ -759,7 +835,10 @@ def main():
                 'taxa_cambio': st.session_state.taxa_cambio,      # Usando a taxa de câmbio automática
                 'estudo': estudo_selecionado,
                 'rendimento_base': rendimento_base,
-                'preco_produto': preco_produto
+                'preco_produto': preco_produto,
+                'preco_ureia': preco_ureia,      # Usando valor da sidebar
+                'preco_crf': preco_crf,          # Usando valor da sidebar
+                'dosagem_n': dosagem_n           # Usando valor da sidebar
             }
             
             if estudo_selecionado == 'shakoor_et_al':
@@ -1021,7 +1100,52 @@ def main():
             st.dataframe(styled_df)
             
             # =================================================================
-            # 9. CONCLUSÕES E RECOMENDAÇÕES
+            # 9. ANÁLISE DE SENSIBILIDADE AOS PREÇOS DOS FERTILIZANTES
+            # =================================================================
+            st.subheader("📊 Sensibilidade aos Preços dos Insumos")
+            
+            # Criar cenários de variação de preço
+            variacoes = [-30, -20, -10, 0, 10, 20, 30]
+            resultados_sensibilidade = []
+            
+            for var in variacoes:
+                preco_ureia_var = preco_ureia * (1 + var/100)
+                preco_crf_var = preco_crf * (1 + var/100)
+                
+                # Recalcular custo adicional
+                custo_conv_var = calcular_custo_fertilizante(
+                    'convencional', 1, preco_ureia_var, preco_crf_var, dosagem_n
+                )[1]
+                custo_crf_var = calcular_custo_fertilizante(
+                    'crf', 1, preco_ureia_var, preco_crf_var, dosagem_n
+                )[1]
+                custo_adicional = custo_crf_var - custo_conv_var
+                
+                # Calcular VPL simplificado
+                beneficio_rendimento_ha = max(0, (rendimento_crf_ha - rendimento_conv_ha) * preco_produto)
+                fluxo_anual = receita_carbono_ha + beneficio_rendimento_ha - custo_adicional
+                vpl_simplificado = sum([fluxo_anual / ((1 + taxa_desconto) ** ano) for ano in range(1, 6)])
+                
+                resultados_sensibilidade.append({
+                    'Variação Preços': f"{var:+}%",
+                    'Custo Ureia (R$/ha)': custo_conv_var,
+                    'Custo CRF (R$/ha)': custo_crf_var,
+                    'Custo Adicional (R$/ha)': custo_adicional,
+                    'VPL/ha (5 anos)': vpl_simplificado
+                })
+            
+            df_sensibilidade = pd.DataFrame(resultados_sensibilidade)
+            
+            # Formatar o DataFrame
+            st.dataframe(df_sensibilidade.style.format({
+                'Custo Ureia (R$/ha)': lambda x: f"R$ {formatar_br(x)}",
+                'Custo CRF (R$/ha)': lambda x: f"R$ {formatar_br(x)}",
+                'Custo Adicional (R$/ha)': lambda x: f"R$ {formatar_br(x)}",
+                'VPL/ha (5 anos)': lambda x: f"R$ {formatar_br(x)}"
+            }))
+            
+            # =================================================================
+            # 10. CONCLUSÕES E RECOMENDAÇÕES
             # =================================================================
             st.subheader("🎯 Conclusões e Recomendações")
             
@@ -1036,6 +1160,7 @@ def main():
                 - **Probabilidade de sucesso:** {formatar_br(probabilidade_viabilidade)}%
                 - **Payback:** {resultados_viabilidade['payback']} anos
                 - **Preço atual do carbono:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
+                - **Custo adicional do CRF:** R$ {formatar_br(custo_crf - custo_convencional)} ({formatar_br(((custo_crf_ha/custo_conv_ha)-1)*100)}% mais caro)
                 
                 **Recomendações:**
                 1. Implementar projeto piloto em área reduzida
@@ -1060,11 +1185,12 @@ def main():
                 - **VPL negativo:** R$ {formatar_br(vpl_ha * area_total)} (R$ {formatar_br(vpl_ha)}/ha)
                 - **Probabilidade de viabilidade:** {formatar_br(probabilidade_viabilidade)}%
                 - **Preço atual do carbono:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
+                - **Custo adicional do CRF:** R$ {formatar_br(custo_crf - custo_convencional)} ({formatar_br(((custo_crf_ha/custo_conv_ha)-1)*100)}% mais caro)
                 - **Fator limitante:** Custo adicional do CRF
                 
                 **Estratégias para viabilizar:**
                 1. Buscar subsídios governamentais para transição
-                2. Negociar desconto com fornecedores de CRF
+                2. Negociar desconto com fornecedores de CRF (viável a partir de R$ {formatar_br(preco_crf * 0.85 if vpl_ha < 0 else preco_crf)}/ton)
                 3. Esperar aumento no preço do carbono (viável a partir de € {formatar_br(preco_minimo_eur if 'preco_minimo_eur' in locals() else 0)}/tCO₂eq)
                 4. Focar no aumento de produtividade como principal benefício
                 5. Considerar combinação CRF + ureia para reduzir custos
@@ -1079,6 +1205,7 @@ def main():
                     - Timing da aeração (MSA) é crítico: MSA em D30 otimiza redução
                     - Necessário compensar perda de rendimento com valor agregado ou carbono
                     - **Preço do carbono atual:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
+                    - **Custo adicional do CRF:** R$ {formatar_br(custo_crf - custo_convencional)} ({formatar_br(((custo_crf_ha/custo_conv_ha)-1)*100)}% mais caro)
                     """)
                 else:
                     st.info(f"""
@@ -1087,6 +1214,7 @@ def main():
                     - Sistema de rotação otimiza benefícios
                     - Viabilidade mais provável devido ao duplo benefício
                     - **Preço do carbono atual:** €{formatar_br(st.session_state.preco_carbono)}/tCO₂eq
+                    - **Custo adicional do CRF:** R$ {formatar_br(custo_crf - custo_convencional)} ({formatar_br(((custo_crf_ha/custo_conv_ha)-1)*100)}% mais caro)
                     """)
     
     else:
