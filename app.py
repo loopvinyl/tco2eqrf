@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 np.random.seed(50)  # Garante reprodutibilidade
 
 # Configurações iniciais
-st.set_page_config(page_title="Simulador de Fertilizantes Nitrogenados", layout="wide")
+st.set_page_config(page_title="Simulador de tCO₂eq para fertilizantes nitrogenados", layout="wide")
 warnings.filterwarnings("ignore", category=FutureWarning)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
@@ -628,7 +628,7 @@ def analise_sensibilidade_sobol(problema, n_amostras=100):
 # =============================================================================
 
 def main():
-    st.title("🌾 Simulador de Fertilizantes Nitrogenados")
+    st.title("🌾 Simulador de tCO₂eq para fertilizantes nitrogenados")
     st.markdown("""
     ### Análise de Viabilidade para Substituição de Fertilizantes Convencionais por Fertilizantes de Liberação Controlada
     
